@@ -1,0 +1,176 @@
+.mmp {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    display: none;
+    flex-direction: column;
+    z-index: 9999;
+    background: var(--bg);
+    border: 1px solid var(--button-text);
+    border-radius: 0.4em;
+    padding: 0.5em;
+    box-sizing: border-box;
+    backdrop-filter: blur(2px);
+    box-shadow: 0px -4px 7px 0px #0000006b;
+    /* 使用 CSS 變量定義按鈕高度 */
+    --mmp-button-height: var(--mmp-custom-height, 4vw);
+}
+
+.mmp-media {
+    width: 100%;
+    height: 2em;
+    margin-bottom: 0.5em;
+}
+
+.mmp-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5em;
+}
+
+.mmp-buttons {
+    display: flex;
+    flex-grow: 1;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5em;
+}
+
+.mmp-playback-buttons {
+    display: flex;
+    flex-grow: 1;
+    justify-content: space-between;
+    min-width: 0;
+    gap: 0.5em;
+    height: var(--mmp-button-height);
+    min-height: 30px;
+}
+
+/* 統一播放控制按鈕樣式 */
+.mmp-play-pause,
+.mmp-prev, 
+.mmp-next {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+    color: inherit;
+    background: var(--bg);
+    border: 1px solid var(--button-text);
+    border-radius: 0.4em;
+    height: var(--mmp-button-height);
+    min-height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+/* 播放狀態下的閃爍效果 */
+.mmp-play-pause.playing {
+    animation: blink 1.6s infinite;
+    background-color: var(--good-contrast);
+    color: var(--bg);
+    border: 1px solid var(--good-contrast);
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    90% { opacity: 0.8; }
+}
+
+/* 音量控制區域 */
+.mmp-volume-control {
+    display: flex;
+    align-items: center;
+    gap: 0.3em;
+    min-width: fit-content;
+}
+
+.mmp-volume-value {
+    min-width: 3em;
+    text-align: center;
+}
+
+/* 音量按鈕樣式 */
+.mmp-vol-down,
+.mmp-vol-up {
+    color: inherit;
+    background: var(--bg);
+    border: 1px solid var(--button-text);
+    border-radius: 0.4em;
+    height: var(--mmp-button-height);
+    min-height: 30px;
+    width: var(--mmp-button-height);
+    min-width: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 關閉按鈕樣式 */
+.mmp-close {
+    color: inherit;
+    background: var(--bg);
+    border: 1px solid var(--button-text);
+    border-radius: 0.4em;
+    height: var(--mmp-button-height);
+    min-height: 30px;
+    width: var(--mmp-button-height);
+    min-width: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 標題文字樣式 */
+.mmp-title {
+    flex-grow: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    padding: 0 0.5em;
+    text-overflow: ellipsis;
+}
+
+.mmp-title.marquee {
+    animation: marquee 15s linear infinite;
+    text-overflow: clip;
+}
+
+@keyframes marquee {
+    0% { transform: translateX(100%); }
+    100% { transform: translateX(-100%); }
+}
+
+/* 文件列表播放按鈕 */
+button.mmp-play {
+    background: none;
+    cursor: pointer;
+    padding: 0 0.5em;
+    font-size: 0.9em;
+    color: inherit;
+}
+
+/* 修復所有按鈕的按壓效果 */
+.mmp button {
+    transition: none;
+    border: 1px solid var(--button-text);
+}
+
+.mmp button:active,
+.mmp button:focus {
+    background: var(--bg) !important;
+    color: inherit !important;
+    border-color: var(--button-text) !important;
+    animation: none !important;
+    outline: none;
+}
+
+/* 播放按鈕特殊狀態 */
+.mmp-play-pause.playing:active,
+.mmp-play-pause.playing:focus {
+    background-color: var(--good-contrast) !important;
+    color: var(--bg) !important;
+    border-color: var(--good-contrast) !important;
+}
