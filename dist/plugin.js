@@ -1,11 +1,11 @@
 exports.description = "A clean and pure music player that plays directly when clicking file icons."
-exports.version = 2.5
+exports.version = 2.8
 exports.apiRequired = 9.5
 exports.repo = "Hug3O/Musicplayer+"
 exports.frontend_css = "style.css"
 exports.frontend_js = "main.js"
 exports.config = {
-    auto_play: {  // 新增自动播放配置
+    auto_play: {
         frontend: true,
         label: "Auto play when clicking audio files",
         type: 'boolean',
@@ -33,12 +33,24 @@ exports.config = {
         defaultValue: 0.75,
         placeholder: "default: 0.75"
     },
-    button_height: {  // 新增按鈕高度配置
+    button_height: {
         frontend: true,
         label: "Button height",
         helperText: "Height of control buttons (e.g. 3vw)",
         type: 'string',
         defaultValue: '3vw',
         placeholder: "default: 3vw"
+    },
+    show_progress: {
+        frontend: true,
+        label: "Show progress bar",
+        type: 'boolean',
+        defaultValue: true
+    },
+    show_countdown: {
+        frontend: true,
+        label: "Show countdown time (remaining time) on mobile",
+        type: 'boolean',
+        defaultValue: true
     }
 }

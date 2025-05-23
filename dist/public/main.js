@@ -17,42 +17,59 @@ const MMP = {
         this.setupAudioBindings()
     },
 
-// 在 initPlayerElement 方法中更新
 initPlayerElement() {
     const cfg = HFS.getPluginConfig()
-    // 更新 CSS 變量
-    document.documentElement.style.setProperty('--mmp-custom-height', cfg.button_height || '4vw');
+    document.documentElement.style.setProperty('--mmp-custom-height', cfg.button_height || '4vw')
     
-    // 其餘初始化代碼保持不變...
+    const progressHTML = cfg.show_progress ? `
+        <div class='mmp-progress-container'>
+            <input type="range" class='mmp-progress-bar' min="0" max="100" value="0">
+        </div>` : ''
+    
     const playerHTML = `
     <div id='mmp-audio' class='mmp' style='display:none'>
-        <audio class='mmp-media' controls controlslist='nodownload'></audio>
-        <div class='mmp-title'></div>
-        <div class='mmp-controls'>
-            <div class='mmp-buttons'>
-                <div class='mmp-playback-buttons'>
-                    <button type="button" class='mmp-prev' title="上一首">◁◁</button>
-                    <button type="button" class='mmp-play-pause' title="播放/暫停">▶</button>
-                    <button type="button" class='mmp-next' title="下一首">▷▷</button>
-                </div>
-                <div class='mmp-volume-control'>
-                    <button type="button" class='mmp-vol-down' title="減小音量">−</button>
-                    <span class='mmp-volume-value'>${Math.round(cfg.audio_vol * 100)}%</span>
-                    <button type="button" class='mmp-vol-up' title="增大音量">+</button>
-                </div>
+        <audio class='mmp-media'></audio>
+        <div class='mmp-header'>
+            <span class='mmp-time'></span>
+            <div class='mmp-title-container'>
+                <div class='mmp-title'></div>
             </div>
             <button type="button" class='mmp-close' title="關閉">✕</button>
         </div>
-    </div>`
-    document.body.insertAdjacentHTML('beforeend', playerHTML)
+        ${progressHTML}
+            <div class='mmp-controls'>
+                <div class='mmp-buttons'>
+                    <div class='mmp-playback-buttons'>
+                        <button type="button" class='mmp-prev' title="上一首">◁◁</button>
+                        <button type="button" class='mmp-play-pause' title="播放/暫停">▶</button>
+                        <button type="button" class='mmp-next' title="下一首">▷▷</button>
+                    </div>
+                    <div class='mmp-volume-control'>
+                        <button type="button" class='mmp-vol-down' title="減小音量">−</button>
+                        <span class='mmp-volume-value'>${Math.round(this.cfg.audio_vol * 100)}%</span>
+                        <button type="button" class='mmp-vol-up' title="增大音量">+</button>
+                    </div>
+                </div>
+            </div>
+        </div>`
+        document.body.insertAdjacentHTML('beforeend', playerHTML)
 
-    document.querySelector('.mmp-prev')?.addEventListener('click', () => this.playPrev())
-    document.querySelector('.mmp-play-pause')?.addEventListener('click', () => this.togglePlay())
-    document.querySelector('.mmp-next')?.addEventListener('click', () => this.playNext())
-    document.querySelector('.mmp-vol-down')?.addEventListener('click', () => this.adjustVolume(-0.01))
-    document.querySelector('.mmp-vol-up')?.addEventListener('click', () => this.adjustVolume(0.01))
-    document.querySelector('.mmp-close')?.addEventListener('click', () => this.stop())
-},
+        document.querySelector('.mmp-prev')?.addEventListener('click', () => this.playPrev())
+        document.querySelector('.mmp-play-pause')?.addEventListener('click', () => this.togglePlay())
+        document.querySelector('.mmp-next')?.addEventListener('click', () => this.playNext())
+        document.querySelector('.mmp-vol-down')?.addEventListener('click', () => this.adjustVolume(-0.01))
+        document.querySelector('.mmp-vol-up')?.addEventListener('click', () => this.adjustVolume(0.01))
+        document.querySelector('.mmp-close')?.addEventListener('click', () => this.stop())
+        
+        if (cfg.show_progress) {
+            document.querySelector('.mmp-progress-bar')?.addEventListener('input', (e) => {
+                const audio = document.querySelector('#mmp-audio audio')
+                if (audio && audio.duration) {
+                    audio.currentTime = (e.target.value / 100) * audio.duration
+                }
+            })
+        }
+    },
 
     setupAudioBindings() {
         const bindAudioIcons = () => {
@@ -66,25 +83,21 @@ initPlayerElement() {
                 const icon = li.querySelector('span.icon')
                 if (!icon) return
 
-                // 添加專用class以便識別
                 icon.classList.add('mmp-audio-icon')
                 icon.style.cursor = 'pointer'
                 icon.title = 'Click to play'
 
                 const handleClick = (e) => {
-                    // 完全阻止事件冒泡和默認行為
                     e.stopImmediatePropagation()
                     e.preventDefault()
                     
                     const entry = this.findEntryByName(name)
                     if (entry) {
-                        // 確保URI正確
                         if (!entry.uri && a.href) entry.uri = a.href
                         this.audio(entry)
                     }
                 }
 
-                // 使用capture階段和high priority確保最先執行
                 icon.addEventListener('click', handleClick, {
                     capture: true,
                     passive: false,
@@ -95,10 +108,7 @@ initPlayerElement() {
             })
         }
 
-        // 初始綁定
         bindAudioIcons()
-        
-        // 監聽DOM變化
         const observer = new MutationObserver(bindAudioIcons)
         observer.observe(document.body, { childList: true, subtree: true })
     },
@@ -179,39 +189,66 @@ initPlayerElement() {
         }
     },
 
-play(entry) {
-    const root = document.getElementById('mmp-audio')
-    if (!root) return
+    play(entry) {
+        const root = document.getElementById('mmp-audio')
+        if (!root) return
 
-    const audio = root.querySelector('audio')
-    const title = root.querySelector('.mmp-title')
-    const playPauseBtn = document.querySelector('.mmp-play-pause')
+        const audio = root.querySelector('audio')
+        const title = root.querySelector('.mmp-title')
+        const playPauseBtn = document.querySelector('.mmp-play-pause')
+        const timeDisplay = document.querySelector('.mmp-time')
 
-    root.style.display = 'flex'
-    audio.src = entry.uri
-    audio.volume = this.cfg.audio_vol
-    audio.play().then(() => {
-        this.isPlaying = true
-        playPauseBtn.textContent = '▶'
-        playPauseBtn.classList.add('playing')
-    }).catch(e => console.error("Playback failed", e))
+        root.style.display = 'flex'
+        audio.src = entry.uri
+        audio.volume = this.cfg.audio_vol
+        audio.play().then(() => {
+            this.isPlaying = true
+            playPauseBtn.textContent = '❚❚'
+            playPauseBtn.classList.add('playing')
+        }).catch(e => console.error("Playback failed", e))
 
-    title.innerText = entry.name
-    title.classList.toggle('marquee', title.scrollWidth > title.clientWidth)
-    document.querySelector('.mmp-volume-value').textContent = `${Math.round(audio.volume * 100)}%`
+        title.innerText = entry.name
+        title.style.whiteSpace = 'nowrap'
+        title.style.overflow = 'hidden'
+        title.style.textOverflow = 'ellipsis'
+        
+        document.querySelector('.mmp-volume-value').textContent = `${Math.round(audio.volume * 100)}%`
 
-    audio.onended = () => this.playNext()
-    audio.onpause = () => {
-        this.isPlaying = false
-        playPauseBtn.textContent = '❚❚'
-        playPauseBtn.classList.remove('playing')
-    }
-    audio.onplay = () => {
-        this.isPlaying = true
-        playPauseBtn.textContent = '▶'
-        playPauseBtn.classList.add('playing')
-    }
-},
+        audio.ontimeupdate = () => {
+            const progress = document.querySelector('.mmp-progress-bar')
+            if (timeDisplay && audio.duration) {
+                if (this.cfg.show_countdown && window.innerWidth <= 600) {
+                    timeDisplay.textContent = `-${this.formatTime(audio.duration - audio.currentTime)}`
+                    timeDisplay.className = 'mmp-time countdown'
+                } else {
+                    timeDisplay.textContent = `${this.formatTime(audio.currentTime)} / ${this.formatTime(audio.duration)}`
+                    timeDisplay.className = 'mmp-time normal-time'
+                }
+                if (progress) {
+                    progress.value = (audio.currentTime / audio.duration) * 100
+                }
+            }
+        }
+
+        audio.onended = () => this.playNext()
+        audio.onpause = () => {
+            this.isPlaying = false
+            playPauseBtn.textContent = '▶'
+            playPauseBtn.classList.remove('playing')
+        }
+        audio.onplay = () => {
+            this.isPlaying = true
+            playPauseBtn.textContent = '❚❚'
+            playPauseBtn.classList.add('playing')
+        }
+    },
+
+    formatTime(seconds) {
+        if (isNaN(seconds)) return '0:00'
+        const mins = Math.floor(seconds / 60)
+        const secs = Math.floor(seconds % 60)
+        return `${mins}:${secs < 10 ? '0' : ''}${secs}`
+    },
 
     playNext() {
         if (!this.playlist.length) return
@@ -301,7 +338,6 @@ document.addEventListener('keydown', e => {
     if (e.key === 'ArrowDown') MMP.adjustVolume(-0.1)
 })
 
-// 新增配置變更監聽
 HFS.onEvent('configChanged', () => {
     const cfg = HFS.getPluginConfig()
     document.documentElement.style.setProperty('--mmp-custom-height', cfg.button_height || '4vw')
