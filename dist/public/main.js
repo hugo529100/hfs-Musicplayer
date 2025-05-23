@@ -31,9 +31,9 @@ initPlayerElement() {
         <div class='mmp-controls'>
             <div class='mmp-buttons'>
                 <div class='mmp-playback-buttons'>
-                    <button type="button" class='mmp-prev' title="上一首">◀</button>
+                    <button type="button" class='mmp-prev' title="上一首">◁◁</button>
                     <button type="button" class='mmp-play-pause' title="播放/暫停">▶</button>
-                    <button type="button" class='mmp-next' title="下一首">▶</button>
+                    <button type="button" class='mmp-next' title="下一首">▷▷</button>
                 </div>
                 <div class='mmp-volume-control'>
                     <button type="button" class='mmp-vol-down' title="減小音量">−</button>

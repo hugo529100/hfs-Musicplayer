@@ -27,7 +27,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5em;
+    gap: 0.3em;
 }
 
 .mmp-buttons {
@@ -35,7 +35,7 @@
     flex-grow: 1;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5em;
+    gap: 0.3em;
 }
 
 .mmp-playback-buttons {
@@ -43,7 +43,7 @@
     flex-grow: 1;
     justify-content: space-between;
     min-width: 0;
-    gap: 0.5em;
+    gap: 0.3em;
     height: var(--mmp-button-height);
     min-height: 30px;
 }
@@ -69,27 +69,26 @@
 
 /* 播放狀態下的閃爍效果 */
 .mmp-play-pause.playing {
-    animation: blink 1.6s infinite;
+animation: blink 1.6s infinite;
     background-color: var(--good-contrast);
     color: var(--bg);
     border: 1px solid var(--good-contrast);
 }
 
-@keyframes blink {
-    0%, 100% { opacity: 1; }
-    90% { opacity: 0.8; }
-}
+
 
 /* 音量控制區域 */
 .mmp-volume-control {
     display: flex;
     align-items: center;
-    gap: 0.3em;
+    gap: 0.1em;
     min-width: fit-content;
 }
 
 .mmp-volume-value {
-    min-width: 3em;
+    font-size: clamp(1em, calc(var(--mmp-button-height) * 0.5), 2em);
+    min-width: auto; /* 移除原本的固定寬度 */
+    padding: 0 0.3em; /* 可視需要加入少許內邊距 */
     text-align: center;
 }
 
@@ -173,4 +172,14 @@ button.mmp-play {
     background-color: var(--good-contrast) !important;
     color: var(--bg) !important;
     border-color: var(--good-contrast) !important;
+}
+
+.mmp-play-pause,
+.mmp-prev, 
+.mmp-next,
+.mmp-vol-down,
+.mmp-vol-up,
+.mmp-close,
+.mmp-volume-value {
+    font-size: clamp(1em, calc(var(--mmp-button-height) * 0.5), 2em);
 }
