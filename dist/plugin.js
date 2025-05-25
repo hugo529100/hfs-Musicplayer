@@ -52,5 +52,12 @@ exports.config = {
         label: "Show countdown time (remaining time) on mobile",
         type: 'boolean',
         defaultValue: true
+    },
+    hide_back_btn_portrait: {  
+        frontend: true,
+        label: "Hide back button in portrait mode on mobile",
+        type: 'boolean',
+        defaultValue: true
     }
+
 }

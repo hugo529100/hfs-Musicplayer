@@ -133,16 +133,16 @@ const MMP = {
             </div>
             ${progressHTML}
             <div class='mmp-controls'>
-                <div class='mmp-buttons'>
-                    <div class='mmp-playback-buttons'>
-                        <button type="button" class='mmp-prev' title="上一首">◁◁</button>
-                        <button type="button" class='mmp-play-pause' title="播放/暫停">▶</button>
-                        <button type="button" class='mmp-next' title="下一首">▷▷</button>
-                    </div>
-                    <button type="button" class='mmp-custom-button' title="返回上一页">▲</button>
+            <div class='mmp-buttons'>
+                <div class='mmp-playback-buttons'>
+                    <button type="button" class='mmp-prev' title="上一首">◁◁</button>
+                    <button type="button" class='mmp-play-pause' title="播放/暫停">▶</button>
+                    <button type="button" class='mmp-next' title="下一首">▷▷</button>
                 </div>
+                <button type="button" class='mmp-custom-button ${this.cfg.hide_back_btn_portrait ? 'hide-portrait' : ''}' title="返回上一页">▲</button>
             </div>
-        </div>`
+        </div>
+    </div>`;
         document.body.insertAdjacentHTML('beforeend', playerHTML)
 
         document.querySelector('.mmp-prev')?.addEventListener('click', () => this.playPrev())

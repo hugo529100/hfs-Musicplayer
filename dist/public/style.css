@@ -334,3 +334,13 @@ button.mmp-play {
         min-width: 35px;
     }
 }
+/* 在文件最后添加 */
+@media (orientation: portrait) {
+    .mmp-custom-button.hide-portrait {
+        display: none !important;
+    }
+    
+    .mmp-playback-buttons {
+        justify-content: center !important;
+    }
+}
