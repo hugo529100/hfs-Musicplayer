@@ -135,11 +135,11 @@ const MMP = {
             <div class='mmp-controls'>
                 <div class='mmp-buttons'>
                     <div class='mmp-playback-buttons'>
-                        <button type="button" class='mmp-prev' title="上一首">⏮︎</button>
+                        <button type="button" class='mmp-prev' title="上一首">◁◁</button>
                         <button type="button" class='mmp-play-pause' title="播放/暫停">▶</button>
-                        <button type="button" class='mmp-next' title="下一首">⏭︎</button>
+                        <button type="button" class='mmp-next' title="下一首">▷▷</button>
                     </div>
-                    <button type="button" class='mmp-custom-button' title="返回上一页">⏎</button>
+                    <button type="button" class='mmp-custom-button' title="返回上一页">▲</button>
                 </div>
             </div>
         </div>`
