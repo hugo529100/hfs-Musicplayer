@@ -9,9 +9,9 @@
     background: var(--bg);
     border: 1px solid var(--button-text);
     border-radius: 0.4em;
-    padding: 0.5em;
+    padding: 0.2em;
     box-sizing: border-box;
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(30px);
     box-shadow: 0px -4px 7px 0px #0000006b;
     --mmp-button-height: var(--mmp-custom-height, 4vw);
     gap: 0.5em;
@@ -29,13 +29,11 @@
     display: flex;
     align-items: center;
     width: 100%;
-    min-height: 0; /* 移除固定高度 */
-    position: relative;
-    padding: 0.2em 0; /* 添加垂直内边距 */
-
+    min-height: 0;
+    /*position: relative;*/
+     /*padding: 0.2em 0;*/
 }
 
-/* 时间显示 */
 .mmp-time {
     font-size: 0.8em;
     min-width: 5em;
@@ -44,16 +42,16 @@
     flex-shrink: 0;
     padding: 0;
     margin-right: 0.3em;
-    line-height: 1.2; /* 精确控制行高 */
-    height: 100%; /* 自动高度 */
+    line-height: 1.2;
+    /*height: 100%;*/
     border: 1px solid var(--faint-contrast);
     border-radius: 0.4em;
     display: flex;
     align-items: center;
     justify-content: center;
+    min-height: 1.5em;
 }
 
-/* 标题容器 */
 .mmp-title-container {
     flex-grow: 1;
     min-width: 0;
@@ -66,35 +64,61 @@
     justify-content: center;
 }
 
-/* 标题文本 */
 .mmp-title {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 0.9em; /* 固定字体大小 */
-    /*width: 100%;*/
+    font-size: 0.9em;
     padding: 0;
     line-height: inherit;
 }
 
-/* 关闭按钮 */
-.mmp-close {
-    color: inherit;
-    background: var(--bg);
-    border: 1px solid var(--button-text);
-    border-radius: 0.3em;
-    height: 1.5em; /* 与字体高度一致 */
+.mmp-header-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.8em;
+}
+
+.mmp-volume-control {
+    display: flex;
+    align-items: center;
+    gap: 0.1em;
+    padding: 0.1em;
+
+}
+
+.mmp-vol-down,
+.mmp-vol-up {
     width: 1.5em;
-    min-height: 0;
-    min-width: 0;
+    height: 1.5em;
     display: flex;
     align-items: center;
     justify-content: center;
-    flex-shrink: 0;
-    font-size: 0.9em; /* 与标题字体大小一致 */
-    padding: 0;
-    margin-left: 0.3em;
-    line-height: 1;
+    background: transparent;
+    border: none;
+    color: var(--button-text);
+    cursor: pointer;
+    font-size: 1em;
+}
+
+.mmp-volume-value {
+    min-width: 3em;
+    text-align: center;
+    font-size: 1em;
+}
+
+.mmp-close {
+    width: 1.5em;
+    height: 1.5em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    border: 1px solid var(--button-text);
+    border-radius: 0.3em;
+    color: var(--button-text);
+    cursor: pointer;
+    font-size: 1em;
 }
 
 .mmp-progress-container {
@@ -105,7 +129,6 @@
 }
 
 .mmp-progress-bar {
-    /* 原有进度条样式保持不变 */
     flex-grow: 1;
     height: 0.5em;
     cursor: pointer;
@@ -115,19 +138,16 @@
     width: 100%;
 }
 
-/* 将滑块改为垂直竖线 */
 .mmp-progress-bar::-webkit-slider-thumb {
     appearance: none;
-    width: 3px; /* 竖线宽度 */
-    height: 1.8em; /* 竖线高度 */
+    width: 3px;
+    height: 1.8em;
     background: var(--good-contrast);
     cursor: pointer;
     border-radius: 0;
     border: none;
-
 }
 
-/* Firefox兼容性 */
 .mmp-progress-bar::-moz-range-thumb {
     width: 3px;
     height: 1.8em;
@@ -137,7 +157,6 @@
     border: none;
 }
 
-/* 悬停时竖线加粗 */
 .mmp-progress-bar:hover::-webkit-slider-thumb {
     width: 3px;
     background: var(--button-text);
@@ -180,7 +199,6 @@
     min-width: 0;
     text-align: center;
     color: inherit;
-    
     border: 1px solid var(--button-text);
     border-radius: 0.4em;
     height: var(--mmp-button-height);
@@ -189,7 +207,7 @@
     align-items: center;
     justify-content: center;
     padding: 0;
-    font-size: clamp(1em, calc(var(--mmp-button-height) * 0.5), 1.5em);
+    font-size: clamp(1em, calc(var(--mmp-button-height) * 0.5), 1.8em);
     position: relative;
     overflow: hidden;
 }
@@ -206,40 +224,23 @@
     right: 0;
     bottom: 0;
     background-color: var(--button-text);
-    animation: blink 1.6s infinite;
     z-index: -1;
 }
 
-
-
-.mmp-volume-control {
-    display: flex;
-    align-items: center;
-    gap: 0.1em;
-    min-width: fit-content;
-}
-
-.mmp-volume-value {
-    font-size: clamp(1em, calc(var(--mmp-button-height) * 0.5), 1.5em);
-    min-width: auto;
-    padding: 0 0.3em;
-    text-align: center;
-}
-
-.mmp-vol-down,
-.mmp-vol-up {
-    color: inherit;
-    background: var(--bg);
-    border: 1px solid var(--button-text);
-    border-radius: 0.4em;
+.mmp-custom-button {
+    width: 10%;
+    min-width: 40px;
     height: var(--mmp-button-height);
     min-height: 30px;
-    width: var(--mmp-button-height);
-    min-width: 8px;
+    color: inherit;
+    border: 1px solid var(--button-text);
+    border-radius: 0.4em;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: clamp(1em, calc(var(--mmp-button-height) * 0.5), 1.5em);
+    padding: 0;
+    font-size: clamp(1em, calc(var(--mmp-button-height) * 1.2), 1.2em);
+    background: var(--bg);
 }
 
 button.mmp-play {
@@ -255,17 +256,20 @@ button.mmp-play {
     border: 1px solid var(--button-text);
 }
 
-.mmp button:active,
-.mmp button:focus {
-
+.mmp button:hover {
+    background-color: var(--button-bg);
+    color: var(--button-text); 
+    outline: none;
 }
 
-.mmp-play-pause.playing:active,
-.mmp-play-pause.playing:focus {
-    border-color: var(--button-text) !important;
+.mmp-audio-icon {
+    cursor: pointer !important;
 }
 
-/* 竖屏布局 */
+.mmp-audio-icon:hover {
+    opacity: 0.8;
+}
+
 @media (orientation: portrait) {
     .mmp-header {
         justify-content: flex-start;
@@ -278,13 +282,15 @@ button.mmp-play {
     .mmp-title {
         text-align: left;
     }
+    .mmp-volume-control {
+        display: none;
+    }
 }
 
-/* 横屏布局 */
 @media (orientation: landscape) {
     .mmp-header {
         justify-content: center;
-        padding: 0.1em 0; /* 更紧凑的内边距 */
+        padding: 0.2em 0;
     }
     .mmp-time {
         position: absolute;
@@ -292,35 +298,39 @@ button.mmp-play {
         margin-right: 0;
     }
     .mmp-title-container {
-        max-width: 60%; /* 更窄的标题宽度 */
+        max-width: 60%;
     }
-    .mmp-close {
+    .mmp-header-controls {
         position: absolute;
         right: 0.5em;
-        margin-left: 0;
     }
 }
 
-/* 小屏幕设备 */
-@media (max-width: 600px) {
+@media (max-width: 200px) {
+    .mmp {
+        padding: 0.3em;
+
+
+    }
+    
     .mmp-header {
         padding: 0.1em 0;
     }
+    
     .mmp-time {
+        font-size: 0.7em;
         min-width: 4em;
-        margin-right: 0.1em;
     }
+    
     .mmp-title {
-        font-size: 0.85em;
+        font-size: 0.8em;
     }
-    .mmp-close {
-        height: 1.4em;
-        width: 1.4em;
+    
+    .mmp-playback-buttons {
+        height: 40px;
     }
-}
-
-.mmp button:hover {
-    background-color: var(--button-bg);
-    color: var(--button-text); 
-    outline: none;
+    
+    .mmp-custom-button {
+        min-width: 35px;
+    }
 }
