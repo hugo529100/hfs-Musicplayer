@@ -30,8 +30,6 @@
     align-items: center;
     width: 100%;
     min-height: 0;
-    /*position: relative;*/
-     /*padding: 0.2em 0;*/
 }
 
 .mmp-time {
@@ -40,22 +38,24 @@
     text-align: center;
     color: var(--button-text);
     flex-shrink: 0;
-    padding: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    padding-left: 3px;
+    padding-right: 3px;
     margin-right: 0.3em;
     line-height: 1.2;
-    /*height: 100%;*/
-    border: 1px solid var(--faint-contrast);
+    border: 1px solid var(--good-contrast);
     border-radius: 0.4em;
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 1.5em;
+    min-height: 1.6em;
 }
 
 .mmp-title-container {
     flex-grow: 1;
     min-width: 0;
-    height: auto;
+    height: 1.5em;
     display: flex;
     align-items: center;
     overflow: hidden;
@@ -84,7 +84,6 @@
     align-items: center;
     gap: 0.1em;
     padding: 0.1em;
-
 }
 
 .mmp-vol-down,
@@ -113,7 +112,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--bg);
+    /*background: var(--bg);*/
     border: 1px solid var(--button-text);
     border-radius: 0.3em;
     color: var(--button-text);
@@ -122,13 +121,33 @@
 }
 
 .mmp-progress-container {
+    position: relative;
     border: 1px solid var(--button-text);
     border-radius: 0.25em;
     padding: 0.5em;
-    margin-bottom: 0.5em;
+    margin-bottom: 0em;/*進度條下邊間距*/
+    background: 
+    radial-gradient(circle at 1px 1px, rgba(150, 150, 150, 0.15) 1px, transparent 1px);
+    background-size: 6px 6px;
+}
+
+.mmp-progress-container.transcoding {
+    background-color: rgba(0,0,0,0.05);
+}
+
+.mmp-progress-container.transcoding::after {
+    content: '转码中...';
+    position: absolute;
+    right: 0.5em;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.8em;
+    color: var(--button-text);
+    opacity: 0.7;
 }
 
 .mmp-progress-bar {
+    position: relative;
     flex-grow: 1;
     height: 0.5em;
     cursor: pointer;
@@ -136,13 +155,20 @@
     border-radius: 0.25em;
     appearance: none;
     width: 100%;
+    --thumb-color: var(--button-text);
+}
+
+.mmp-progress-bar:disabled {
+    opacity: 0.7;
+    --thumb-color: var(--faint-contrast);
+    cursor: not-allowed;
 }
 
 .mmp-progress-bar::-webkit-slider-thumb {
     appearance: none;
     width: 3px;
     height: 1.8em;
-    background: var(--good-contrast);
+    background: var(--thumb-color);
     cursor: pointer;
     border-radius: 0;
     border: none;
@@ -151,7 +177,7 @@
 .mmp-progress-bar::-moz-range-thumb {
     width: 3px;
     height: 1.8em;
-    background: var(--button-text);
+    background: var(--thumb-color);
     cursor: pointer;
     border-radius: 0;
     border: none;
@@ -165,6 +191,19 @@
 .mmp-progress-bar:hover::-moz-range-thumb {
     width: 3px;
     background: var(--button-text);
+}
+
+.mmp-loading-indicator {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    height: 1px;
+    width: 0;
+    background-color: var(--good-contrast);
+    transform: translateY(-50%);
+    z-index: 2;
+    pointer-events: none;
+    transition: width 0.1s linear;
 }
 
 .mmp-controls {
@@ -210,10 +249,14 @@
     font-size: clamp(1em, calc(var(--mmp-button-height) * 0.5), 1.8em);
     position: relative;
     overflow: hidden;
+    background: 
+        radial-gradient(circle at 1px 1px, rgba(150, 150, 150, 0.15) 1px, transparent 1px);
+    background-size: 8px 8px;
 }
 
 .mmp-play-pause.playing {
     color: var(--bg);
+background-color: var(--button-text);
 }
 
 .mmp-play-pause.playing::before {
@@ -241,6 +284,9 @@
     padding: 0;
     font-size: clamp(1em, calc(var(--mmp-button-height) * 1.2), 1.2em);
     background: var(--bg);
+    background: 
+    radial-gradient(circle at 1px 1px, rgba(150, 150, 150, 0.15) 1px, transparent 1px);
+    background-size: 8px 8px;
 }
 
 button.mmp-play {
@@ -278,6 +324,7 @@ button.mmp-play {
     .mmp-time {
         margin-right: 0.1em;
         min-width: 4.5em;
+        min-height: 1.6em;
     }
     .mmp-title {
         text-align: left;
@@ -296,6 +343,8 @@ button.mmp-play {
         position: absolute;
         left: 0.5em;
         margin-right: 0;
+        min-height: 1.6em;
+        min-width: 7em;
     }
     .mmp-title-container {
         max-width: 60%;
@@ -309,8 +358,6 @@ button.mmp-play {
 @media (max-width: 200px) {
     .mmp {
         padding: 0.3em;
-
-
     }
     
     .mmp-header {
@@ -320,6 +367,7 @@ button.mmp-play {
     .mmp-time {
         font-size: 0.7em;
         min-width: 4em;
+min-height: 1.6em;
     }
     
     .mmp-title {
@@ -334,7 +382,7 @@ button.mmp-play {
         min-width: 35px;
     }
 }
-/* 在文件最后添加 */
+
 @media (orientation: portrait) {
     .mmp-custom-button.hide-portrait {
         display: none !important;
@@ -344,3 +392,19 @@ button.mmp-play {
         justify-content: center !important;
     }
 }
+
+    @media (forced-colors: active) {
+
+        .mmp-progress-bar::-webkit-slider-thumb {
+            background: Highlight !important;
+            border: 1px solid ButtonText !important;
+        }
+        .mmp-progress-bar::-moz-range-thumb {
+            background: Highlight !important;
+            border: 1px solid ButtonText !important;
+        }
+        .mmp-progress-bar::-ms-thumb {
+            background: Highlight !important;
+            border: 1px solid ButtonText !important;
+        }
+    }

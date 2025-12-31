@@ -1,5 +1,5 @@
 exports.description = "A clean and pure music player that plays directly when clicking file icons."
-exports.version = 2.8
+exports.version = 4.6
 exports.apiRequired = 9.5
 exports.repo = "Hug3O/Musicplayer+"
 exports.frontend_css = "style.css"
@@ -36,10 +36,10 @@ exports.config = {
     button_height: {
         frontend: true,
         label: "Button height",
-        helperText: "Height of control buttons (e.g. 3vw)",
+        helperText: "Height of control buttons (e.g. 4vw)",
         type: 'string',
-        defaultValue: '3vw',
-        placeholder: "default: 3vw"
+        defaultValue: '4vw',
+        placeholder: "default: 4vw"
     },
     show_progress: {
         frontend: true,
@@ -58,6 +58,44 @@ exports.config = {
         label: "Hide back button in portrait mode on mobile",
         type: 'boolean',
         defaultValue: true
+    },
+    lossless_formats: {
+        frontend: true,
+        label: "Enable lossless audio formats support",
+        type: 'boolean',
+        defaultValue: true
+    },
+    cache_check: {
+        frontend: true,
+        label: "Check for cached transcoded versions",
+        type: 'boolean',
+        defaultValue: true
+    },
+    enable_cache: {
+        frontend: false,
+        label: "Enable caching (playlist and audio files)",
+        helperText: "Cache playlists and audio files locally to reduce network requests and traffic. Uses IndexedDB for audio storage.",
+        type: 'boolean',
+        defaultValue: true
+    },
+    max_cache_size: {
+        frontend: false,
+        label: "Maximum cache size (MB)",
+        helperText: "Maximum size for audio cache storage. Recommended: 100-500 MB",
+        type: 'number',
+        min: 10,
+        max: 10240,
+        defaultValue: 1024,
+        placeholder: "default: 1024"
+    },
+    cache_expiry_hours: {
+        frontend: false,
+        label: "Cache expiry time (hours)",
+        helperText: "How long to keep cached files before refreshing",
+        type: 'number',
+        min: 1,
+        max: 168,
+        defaultValue: 24,
+        placeholder: "default: 24"
     }
-
 }
