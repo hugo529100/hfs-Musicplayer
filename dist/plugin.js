@@ -62,12 +62,14 @@ exports.config = {
     lossless_formats: {
         frontend: true,
         label: "Enable lossless audio formats support",
+        helperText: "Play the decoded WAV version located in the cache folder under the same directory as the music file.",
         type: 'boolean',
         defaultValue: true
     },
     cache_check: {
         frontend: true,
         label: "Check for cached transcoded versions",
+        helperText: "Play the decoded WAV version located in the cache folder under the same directory as the music file.",
         type: 'boolean',
         defaultValue: true
     },
