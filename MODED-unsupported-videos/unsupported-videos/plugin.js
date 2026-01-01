@@ -13,7 +13,7 @@ const MIN_FILE_SIZE = 1024;
 const WAV_MIN_SIZE = 1024 * 1024;
 const FLAC_HEADER = Buffer.from('664c6143', 'hex');
 const SUPPORTED_AUDIO_EXTS = ['mp3','flac','m4a','ogg','wma','aiff','aif','alac','dsd','dsf','dff','ape','wav'];
-const SUPPORTED_VIDEO_EXTS = ['webm','avi,mkv','mp4','mov','mpg','wmv','ts','rmvb','rm','dat','vob','flv'];
+const SUPPORTED_VIDEO_EXTS = ['webm','avi','mkv','mp4','mov','mpg','wmv','ts','rmvb','rm','dat','vob','flv'];
 const PROCESS_CLEANUP_TIMEOUT = 5000; // Timeout for process cleanup (5 seconds)
 
 // 重新整理的配置面板 - 重要設置項目靠前
