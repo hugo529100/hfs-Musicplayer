@@ -1,4 +1,4 @@
-exports.version = 3.1;
+exports.version = 3.2;
 exports.apiRequired = 12.91;
 exports.description = "Optimized media player with intelligent gradient transcoding and high-quality DSD/DSF support";
 exports.repo = "Hug3O/Unsupported-videos";
