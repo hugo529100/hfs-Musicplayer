@@ -19,7 +19,7 @@ if (cfg.use_file_list) {
             return h('button', {
                 className: 'mmp-play',
                 onClick: () => MMP.audio(entry),
-                title: "播放"
+                title: "Play"
             }, '➤')
         }
     })
@@ -496,22 +496,22 @@ const MMP = {
                 </div>
                 <div class='mmp-header-controls'>
                     <div class='mmp-volume-control'>
-                        <button type="button" class='mmp-vol-down' title="減小音量">−</button>
+                        <button type="button" class='mmp-vol-down' title="Decrease volume">−</button>
                         <span class='mmp-volume-value'>${Math.round(this.cfg.audio_vol * 100)}%</span>
-                        <button type="button" class='mmp-vol-up' title="增大音量">+</button>
+                        <button type="button" class='mmp-vol-up' title="Increase volume">+</button>
                     </div>
-                    <button type="button" class='mmp-close' title="關閉">✕</button>
+                    <button type="button" class='mmp-close' title="Close">✕</button>
                 </div>
             </div>
             ${progressHTML}
             <div class='mmp-controls'>
             <div class='mmp-buttons'>
                 <div class='mmp-playback-buttons'>
-                    <button type="button" class='mmp-prev' title="上一首">I◁◁</button>
-                    <button type="button" class='mmp-play-pause' title="播放/暫停">➤</button>
-                    <button type="button" class='mmp-next' title="下一首">▷▷I</button>
+                    <button type="button" class='mmp-prev' title="Previous">I◁◁</button>
+                    <button type="button" class='mmp-play-pause' title="Play/Pause">➤</button>
+                    <button type="button" class='mmp-next' title="Next">▷▷I</button>
                 </div>
-                <button type="button" class='mmp-custom-button ${this.cfg.hide_back_btn_portrait ? 'hide-portrait' : ''}' title="返回上一页">▲</button>
+                <button type="button" class='mmp-custom-button ${this.cfg.hide_back_btn_portrait ? 'hide-portrait' : ''}' title="Go back">▲</button>
             </div>
         </div>
     </div>`;
@@ -816,12 +816,12 @@ const MMP = {
                     
                     this.startCacheProbe(entry.uri)
                 } catch (e2) {
-                    this.showError("无法播放此音频格式")
+                    this.showError("Cannot play this audio format")
                     // 总是保持播放器可见
                     this.pause()
                 }
             } else {
-                this.showError("无法播放此音频格式")
+                this.showError("Cannot play this audio format")
                 // 总是保持播放器可见
                 this.pause()
             }

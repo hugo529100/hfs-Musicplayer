@@ -122,7 +122,7 @@
 
 .mmp-progress-container {
     position: relative;
-    border: 1px solid var(--button-text);
+    border: 2px solid var(--button-text);
     border-radius: 0.25em;
     padding: 0.5em;
     margin-bottom: 0em;/*進度條下邊間距*/
@@ -136,7 +136,7 @@
 }
 
 .mmp-progress-container.transcoding::after {
-    content: '转码中...';
+    content: 'Transcoding...';
     position: absolute;
     right: 0.5em;
     top: 50%;
@@ -149,7 +149,7 @@
 .mmp-progress-bar {
     position: relative;
     flex-grow: 1;
-    height: 0.5em;
+    height: 0.6em;
     cursor: pointer;
     background: var(--faint-contrast);
     border-radius: 0.25em;
@@ -164,9 +164,10 @@
     cursor: not-allowed;
 }
 
+/*進度跳針寬度*/
 .mmp-progress-bar::-webkit-slider-thumb {
     appearance: none;
-    width: 3px;
+    width: 5px;
     height: 1.8em;
     background: var(--thumb-color);
     cursor: pointer;
@@ -175,7 +176,7 @@
 }
 
 .mmp-progress-bar::-moz-range-thumb {
-    width: 3px;
+    width: 5px;
     height: 1.8em;
     background: var(--thumb-color);
     cursor: pointer;
@@ -184,12 +185,12 @@
 }
 
 .mmp-progress-bar:hover::-webkit-slider-thumb {
-    width: 3px;
+    width: 5px;
     background: var(--button-text);
 }
 
 .mmp-progress-bar:hover::-moz-range-thumb {
-    width: 3px;
+    width: 5px;
     background: var(--button-text);
 }
 
