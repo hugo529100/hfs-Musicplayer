@@ -11,8 +11,8 @@
     border-radius: 0.4em;
     padding: 0.2em;
     box-sizing: border-box;
-    backdrop-filter: blur(30px);
-    box-shadow: 0px -4px 7px 0px #0000006b;
+    backdrop-filter: blur(20px);
+    box-shadow: 0px -4px 4px 0px #0000006b;
     --mmp-button-height: var(--mmp-custom-height, 4vw);
     gap: 0.5em;
 }
@@ -167,7 +167,7 @@
 /*進度跳針寬度*/
 .mmp-progress-bar::-webkit-slider-thumb {
     appearance: none;
-    width: 5px;
+    width: 4px;
     height: 1.8em;
     background: var(--thumb-color);
     cursor: pointer;
@@ -176,7 +176,7 @@
 }
 
 .mmp-progress-bar::-moz-range-thumb {
-    width: 5px;
+    width: 4px;
     height: 1.8em;
     background: var(--thumb-color);
     cursor: pointer;
@@ -185,12 +185,12 @@
 }
 
 .mmp-progress-bar:hover::-webkit-slider-thumb {
-    width: 5px;
+    width: 4px;
     background: var(--button-text);
 }
 
 .mmp-progress-bar:hover::-moz-range-thumb {
-    width: 5px;
+    width: 4px;
     background: var(--button-text);
 }
 
@@ -251,7 +251,7 @@
     position: relative;
     overflow: hidden;
     background: 
-        radial-gradient(circle at 1px 1px, rgba(150, 150, 150, 0.15) 1px, transparent 1px);
+    radial-gradient(circle at 1px 1px, rgba(150, 150, 150, 0.15) 1px, transparent 1px);
     background-size: 8px 8px;
 }
 
