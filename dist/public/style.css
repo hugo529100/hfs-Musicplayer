@@ -7,12 +7,12 @@
     flex-direction: column;
     z-index: 9999;
     background: var(--bg);
-    border: 1px solid var(--button-text);
+    border: 1px solid var(--text);
     border-radius: 0.4em;
     padding: 0.2em;
     box-sizing: border-box;
-    backdrop-filter: blur(20px);
-    box-shadow: 0px -4px 4px 0px #0000006b;
+    backdrop-filter: blur(30px);
+    box-shadow: 0px -4px 6px 0px #0000006b;
     --mmp-button-height: var(--mmp-custom-height, 4vw);
     gap: 0.5em;
 }
@@ -36,7 +36,7 @@
     font-size: 0.8em;
     min-width: 5em;
     text-align: center;
-    color: var(--button-text);
+    color: var(--text);
     flex-shrink: 0;
     padding-top: 0;
     padding-bottom: 0;
@@ -95,7 +95,7 @@
     justify-content: center;
     background: transparent;
     border: none;
-    color: var(--button-text);
+    color: var(--text);
     cursor: pointer;
     font-size: 1em;
 }
@@ -113,16 +113,16 @@
     align-items: center;
     justify-content: center;
     /*background: var(--bg);*/
-    border: 1px solid var(--button-text);
+    border: 1px solid var(--text);
     border-radius: 0.3em;
-    color: var(--button-text);
+    color: var(--text);
     cursor: pointer;
     font-size: 1em;
 }
 
 .mmp-progress-container {
     position: relative;
-    border: 2px solid var(--button-text);
+    border: 1px solid var(--text);
     border-radius: 0.25em;
     padding: 0.5em;
     margin-bottom: 0em;/*進度條下邊間距*/
@@ -142,7 +142,7 @@
     top: 50%;
     transform: translateY(-50%);
     font-size: 0.8em;
-    color: var(--button-text);
+    color: var(--text);
     opacity: 0.7;
 }
 
@@ -155,7 +155,7 @@
     border-radius: 0.25em;
     appearance: none;
     width: 100%;
-    --thumb-color: var(--button-text);
+    --thumb-color: var(--text);
 }
 
 .mmp-progress-bar:disabled {
@@ -167,7 +167,7 @@
 /*進度跳針寬度*/
 .mmp-progress-bar::-webkit-slider-thumb {
     appearance: none;
-    width: 4px;
+    width: 5px;
     height: 1.8em;
     background: var(--thumb-color);
     cursor: pointer;
@@ -176,7 +176,7 @@
 }
 
 .mmp-progress-bar::-moz-range-thumb {
-    width: 4px;
+    width: 5px;
     height: 1.8em;
     background: var(--thumb-color);
     cursor: pointer;
@@ -185,13 +185,13 @@
 }
 
 .mmp-progress-bar:hover::-webkit-slider-thumb {
-    width: 4px;
-    background: var(--button-text);
+    width: 5px;
+    background: var(--text);
 }
 
 .mmp-progress-bar:hover::-moz-range-thumb {
-    width: 4px;
-    background: var(--button-text);
+    width: 5px;
+    background: var(--text);
 }
 
 .mmp-loading-indicator {
@@ -239,7 +239,7 @@
     min-width: 0;
     text-align: center;
     color: inherit;
-    border: 1px solid var(--button-text);
+    border: 1px solid var(--text);
     border-radius: 0.4em;
     height: var(--mmp-button-height);
     min-height: 30px;
@@ -251,13 +251,13 @@
     position: relative;
     overflow: hidden;
     background: 
-    radial-gradient(circle at 1px 1px, rgba(150, 150, 150, 0.15) 1px, transparent 1px);
+        radial-gradient(circle at 1px 1px, rgba(150, 150, 150, 0.15) 1px, transparent 1px);
     background-size: 8px 8px;
 }
 
 .mmp-play-pause.playing {
     color: var(--bg);
-background-color: var(--button-text);
+background-color: var(--text);
 }
 
 .mmp-play-pause.playing::before {
@@ -267,7 +267,7 @@ background-color: var(--button-text);
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: var(--button-text);
+    background-color: var(--text);
     z-index: -1;
 }
 
@@ -277,7 +277,7 @@ background-color: var(--button-text);
     height: var(--mmp-button-height);
     min-height: 30px;
     color: inherit;
-    border: 1px solid var(--button-text);
+    border: 1px solid var(--text);
     border-radius: 0.4em;
     display: flex;
     align-items: center;
@@ -300,12 +300,12 @@ button.mmp-play {
 
 .mmp button {
     transition: none;
-    border: 1px solid var(--button-text);
+    border: 1px solid var(--text);
 }
 
 .mmp button:hover {
     background-color: var(--button-bg);
-    color: var(--button-text); 
+    color: var(--text); 
     outline: none;
 }
 

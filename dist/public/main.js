@@ -526,8 +526,8 @@ const MMP = {
         document.querySelector('.mmp-next')?.addEventListener('click', () => {
             setTimeout(() => this.playNext(), 300)
         })
-        document.querySelector('.mmp-vol-down')?.addEventListener('click', () => this.adjustVolume(-1))
-        document.querySelector('.mmp-vol-up')?.addEventListener('click', () => this.adjustVolume(1))
+        document.querySelector('.mmp-vol-down')?.addEventListener('click', () => this.adjustVolume(-5))
+        document.querySelector('.mmp-vol-up')?.addEventListener('click', () => this.adjustVolume(5))
         document.querySelector('.mmp-close')?.addEventListener('click', () => this.stop())
         
         document.querySelector('.mmp-custom-button')?.addEventListener('click', () => {
