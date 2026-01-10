@@ -1,4 +1,3 @@
-
 const { h, t } = HFS
 const cfg = HFS.getPluginConfig()
 
@@ -54,6 +53,8 @@ const MMP = {
     dbVersion: 1,
     db: null,
     isDbInitialized: false,
+    currentBitrate: 0,
+    bitrateCache: new Map(), // 新增：缓存比特率
 
     async init() {
         const savedVol = localStorage.getItem('mmp_volume')
@@ -486,11 +487,17 @@ const MMP = {
                 <div class='mmp-loading-indicator'></div>
             </div>` : ''
         
+        // 添加比特率显示的HTML
+        const bitrateHTML = this.cfg.show_bitrate ? `
+            <span class='mmp-bitrate'></span>
+        ` : ''
+        
         const playerHTML = `
         <div id='mmp-audio' class='mmp' style='display:none'>
             <audio class='mmp-media'></audio>
             <div class='mmp-header'>
                 <span class='mmp-time'></span>
+                ${bitrateHTML}
                 <div class='mmp-title-container'>
                     <div class='mmp-title'></div>
                 </div>
@@ -596,6 +603,7 @@ const MMP = {
     updateTimeDisplay(audio) {
         const timeDisplay = document.querySelector('.mmp-time')
         const progressBar = document.querySelector('.mmp-progress-bar')
+        const bitrateDisplay = document.querySelector('.mmp-bitrate')
         
         if (!timeDisplay) return
         
@@ -607,6 +615,11 @@ const MMP = {
                 timeDisplay.textContent = `${this.formatTime(audio.currentTime)} / ${this.formatTime(audio.duration)}`
                 timeDisplay.className = 'mmp-time normal-time'
             }
+            
+            // 更新比特率显示
+            if (bitrateDisplay && this.cfg.show_bitrate && this.currentBitrate > 0) {
+                bitrateDisplay.textContent = this.formatBitrateWithUnits(this.currentBitrate)
+            }
         } else {
             const elapsed = (Date.now() - this.lastUpdateTime) / 1000
             timeDisplay.textContent = `Decoding: ${this.formatTime(elapsed)}`
@@ -615,6 +628,11 @@ const MMP = {
             if (progressBar) {
                 progressBar.value = 0
                 progressBar.disabled = true
+            }
+            
+            // 解码时清除比特率显示
+            if (bitrateDisplay) {
+                bitrateDisplay.textContent = ''
             }
         }
         
@@ -627,6 +645,35 @@ const MMP = {
                 progressBar.disabled = true
             }
         }
+    },
+
+    formatBitrateWithUnits(bitrate) {
+        // 智能选择单位显示
+        if (bitrate >= 1000000) {
+            // 大于等于1 Mbps，显示为 Mbps
+            const mbps = bitrate / 1000000
+            return `${mbps.toFixed(1)} Mbps`
+        } else if (bitrate >= 1000) {
+            // 大于等于1 kbps，显示为 kbps
+            const kbps = bitrate / 1000
+            // 如果超过999 kbps，显示一位小数
+            if (kbps >= 100) {
+                return `${Math.round(kbps)} kbps`
+            } else if (kbps >= 10) {
+                return `${kbps.toFixed(1)} kbps`
+            } else {
+                return `${kbps.toFixed(1)} kbps`
+            }
+        } else {
+            // 小于1 kbps，显示为 bps
+            return `${Math.round(bitrate)} bps`
+        }
+    },
+
+    formatBitrate(bitrate) {
+        // 向后兼容的方法，统一使用kbps显示
+        const kbps = Math.round(bitrate / 1000)
+        return `${kbps} kbps`
     },
 
     handleProgressChange(e) {
@@ -678,6 +725,7 @@ const MMP = {
         const title = root.querySelector('.mmp-title')
         const playPauseBtn = document.querySelector('.mmp-play-pause')
         const progressBar = document.querySelector('.mmp-progress-bar')
+        const bitrateDisplay = root.querySelector('.mmp-bitrate')
 
         root.style.display = 'flex'
         this.isTranscoded = false
@@ -701,6 +749,21 @@ const MMP = {
             title.style.textOverflow = 'ellipsis'
         }
 
+        // 检查缓存中是否有比特率
+        const cachedBitrate = this.bitrateCache.get(entry.uri)
+        if (cachedBitrate) {
+            this.currentBitrate = cachedBitrate
+            if (bitrateDisplay && this.cfg.show_bitrate) {
+                bitrateDisplay.textContent = this.formatBitrateWithUnits(cachedBitrate)
+            }
+            console.log('Bitrate from cache:', entry.name, '->', cachedBitrate, 'bps')
+        } else {
+            this.currentBitrate = 0
+            if (bitrateDisplay) {
+                bitrateDisplay.textContent = ''
+            }
+        }
+
         const isSpecialFormat = this.needTranscodeFormats.test(entry.uri)
         
         try {
@@ -714,6 +777,13 @@ const MMP = {
                 this.isTranscoded = false
                 this.loadedFromCache = true
                 console.log('Using cached audio:', entry.name)
+                
+                // 如果没有缓存的比特率，尝试获取
+                if (this.currentBitrate === 0) {
+                    setTimeout(() => {
+                        this.calculateAndCacheBitrate(audio, entry)
+                    }, 1000)
+                }
             } else {
                 let cacheInfo = null
                 if (this.cfg.cache_check && isSpecialFormat) {
@@ -725,6 +795,13 @@ const MMP = {
                     this.isTranscoded = false
                     this.loadedFromCache = true
                     if (progressBar) progressBar.disabled = false
+                    
+                    // 如果没有缓存的比特率，尝试获取
+                    if (this.currentBitrate === 0) {
+                        setTimeout(() => {
+                            this.calculateAndCacheBitrate(audio, entry)
+                        }, 1000)
+                    }
                 } else if (isSpecialFormat && unsupportedPlugin) {
                     // 总是尝试 ffmpeg
                     audio.src = entry.uri + "?ffmpeg"
@@ -735,12 +812,18 @@ const MMP = {
                     if (progressBar) {
                         progressBar.disabled = true
                     }
+                    
+                    // 对于FFmpeg转码的音频，尝试从FFmpeg输出获取比特率
+                    this.getBitrateFromFfmpeg(entry.uri)
                 } else {
                     if (this.cfg.enable_cache) {
                         try {
                             const response = await fetch(entry.uri)
                             const arrayBuffer = await response.arrayBuffer()
                             const contentType = response.headers.get('content-type') || 'audio/mpeg'
+                            
+                            // 尝试从文件解析比特率
+                            this.tryParseBitrateFromFile(entry, arrayBuffer, contentType)
                             
                             const cachedUrl = await this.cacheAudio(entry.uri, arrayBuffer, contentType)
                             if (cachedUrl) {
@@ -751,9 +834,21 @@ const MMP = {
                             }
                         } catch (fetchError) {
                             audio.src = entry.uri
+                            // 直接播放时也尝试计算比特率
+                            if (this.currentBitrate === 0) {
+                                setTimeout(() => {
+                                    this.calculateAndCacheBitrate(audio, entry)
+                                }, 1000)
+                            }
                         }
                     } else {
                         audio.src = entry.uri
+                        // 直接播放时尝试计算比特率
+                        if (this.currentBitrate === 0) {
+                            setTimeout(() => {
+                                this.calculateAndCacheBitrate(audio, entry)
+                            }, 1000)
+                        }
                     }
                     this.isTranscoded = false
                     this.ffmpegAttempted = false
@@ -780,6 +875,13 @@ const MMP = {
                     if (progressBar) progressBar.disabled = false
                     this.isTranscoded = false
                     audio.ontimeupdate = () => this.updateTimeDisplay(audio)
+                    
+                    // 转码完成后尝试计算比特率
+                    if (this.currentBitrate === 0) {
+                        setTimeout(() => {
+                            this.calculateAndCacheBitrate(audio, entry)
+                        }, 1000)
+                    }
                 }
                 this.startCacheProbe(entry.uri)
             }
@@ -800,6 +902,9 @@ const MMP = {
                     if (progressBar) {
                         progressBar.disabled = true
                     }
+                    
+                    // 对于FFmpeg转码的音频，尝试从FFmpeg输出获取比特率
+                    this.getBitrateFromFfmpeg(entry.uri)
                     
                     await this.ensureAudioPlayable(audio)
                     this.isPlaying = true
@@ -857,302 +962,543 @@ const MMP = {
         }
     },
 
+    async getBitrateFromFfmpeg(uri) {
+        try {
+            console.log('Attempting to get bitrate from FFmpeg for:', uri);
+            
+            // 创建一个测试用的音频元素来获取FFmpeg处理的信息
+            const testAudio = new Audio();
+            testAudio.src = uri + "?ffmpeg&probe";
+            
+            // 监听元数据加载事件
+            testAudio.addEventListener('loadedmetadata', () => {
+                console.log('FFmpeg metadata loaded for:', uri);
+                
+                // 尝试从音频元素获取比特率信息
+                if (testAudio.duration && testAudio.duration > 0) {
+                    // 如果音频是通过FFmpeg处理的，可能已经包含了正确的时长信息
+                    // 我们可以尝试从文件大小和时长计算比特率
+                    this.fetchFileSizeAndCalculateBitrate(uri, testAudio.duration);
+                }
+            });
+            
+            testAudio.addEventListener('error', (e) => {
+                console.warn('Error loading FFmpeg probe:', e);
+            });
+            
+            // 预加载但不播放
+            testAudio.load();
+            
+        } catch (e) {
+            console.warn('Failed to get bitrate from FFmpeg:', e);
+        }
+    },
+
+    async fetchFileSizeAndCalculateBitrate(uri, duration) {
+        try {
+            const response = await fetch(uri, { method: 'HEAD' });
+            const contentLength = response.headers.get('content-length');
+            
+            if (contentLength && duration > 0) {
+                const fileSize = parseInt(contentLength);
+                const bitrate = Math.round((fileSize * 8) / duration);
+                
+                console.log('Calculated bitrate from file size:', fileSize, 'bytes, duration:', duration, 'seconds, bitrate:', bitrate, 'bps');
+                
+                if (bitrate > 0) {
+                    this.currentBitrate = bitrate;
+                    this.bitrateCache.set(uri, bitrate);
+                    
+                    const bitrateDisplay = document.querySelector('.mmp-bitrate');
+                    if (bitrateDisplay && this.cfg.show_bitrate) {
+                        bitrateDisplay.textContent = this.formatBitrateWithUnits(bitrate);
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to fetch file size:', e);
+        }
+    },
+
+    tryParseBitrateFromFile(entry, arrayBuffer, contentType) {
+        try {
+            console.log('Attempting to parse bitrate from file:', entry.name);
+            
+            const ext = entry.name.split('.').pop().toLowerCase();
+            
+            // 根据文件类型尝试不同的解析方法
+            switch(ext) {
+                case 'mp3':
+                    this.parseMp3Bitrate(arrayBuffer, entry);
+                    break;
+                case 'flac':
+                case 'wav':
+                case 'aac':
+                case 'm4a':
+                case 'ogg':
+                case 'opus':
+                    // 对于这些格式，主要依赖文件大小和时长计算
+                    console.log('Bitrate calculation for', ext, 'will be done from file size/duration');
+                    break;
+                default:
+                    console.log('No specific parser for', ext, 'extension');
+            }
+            
+        } catch (e) {
+            console.warn('Failed to parse bitrate from file:', e);
+        }
+    },
+
+    parseMp3Bitrate(arrayBuffer, entry) {
+        try {
+            console.log('Parsing MP3 bitrate from file header');
+            
+            if (arrayBuffer.byteLength < 100) {
+                console.log('File too small to parse MP3 header');
+                return;
+            }
+            
+            const view = new DataView(arrayBuffer);
+            
+            // 寻找MP3帧头
+            for (let i = 0; i < Math.min(1000, arrayBuffer.byteLength - 4); i++) {
+                const header = view.getUint32(i);
+                
+                // 检查是否是有效的MP3帧头 (11个同步位)
+                if ((header & 0xFFE00000) === 0xFFE00000) {
+                    console.log('Found MP3 frame header at position', i);
+                    
+                    // 获取比特率索引（位16-19）
+                    const bitrateIndex = (header >> 12) & 0x0F;
+                    
+                    // MPEG 1 Layer 3 比特率表
+                    const mpeg1Layer3Bitrates = [
+                        0, 32, 40, 48, 56, 64, 80, 96, 
+                        112, 128, 160, 192, 224, 256, 320, 0
+                    ];
+                    
+                    if (bitrateIndex > 0 && bitrateIndex < 15) {
+                        const bitrateKbps = mpeg1Layer3Bitrates[bitrateIndex];
+                        if (bitrateKbps > 0) {
+                            const bitrateBps = bitrateKbps * 1000;
+                            console.log('MP3 bitrate from header:', bitrateKbps, 'kbps');
+                            
+                            this.currentBitrate = bitrateBps;
+                            this.bitrateCache.set(entry.uri, bitrateBps);
+                            
+                            const bitrateDisplay = document.querySelector('.mmp-bitrate');
+                            if (bitrateDisplay && this.cfg.show_bitrate) {
+                                bitrateDisplay.textContent = this.formatBitrateWithUnits(bitrateBps);
+                            }
+                            return;
+                        }
+                    }
+                    
+                    break; // 找到第一个有效帧头后就停止
+                }
+            }
+            
+            console.log('Could not parse MP3 bitrate from header');
+        } catch (e) {
+            console.warn('Failed to parse MP3 bitrate:', e);
+        }
+    },
+
+    calculateAndCacheBitrate(audio, entry) {
+        if (this.currentBitrate > 0) return; // 已经有比特率了
+        
+        const bitrate = this.calculateBitrateFromAudio(audio, entry);
+        if (bitrate > 0) {
+            this.currentBitrate = bitrate;
+            this.bitrateCache.set(entry.uri, bitrate);
+            
+            const bitrateDisplay = document.querySelector('.mmp-bitrate');
+            if (bitrateDisplay && this.cfg.show_bitrate) {
+                bitrateDisplay.textContent = this.formatBitrateWithUnits(bitrate);
+            }
+            console.log('Calculated bitrate from audio:', entry.name, '->', bitrate, 'bps');
+        }
+    },
+
+    calculateBitrateFromAudio(audio, entry) {
+        try {
+            // 首先检查是否有缓存
+            const cachedBitrate = this.bitrateCache.get(entry.uri);
+            if (cachedBitrate) {
+                console.log('Returning cached bitrate:', cachedBitrate, 'bps');
+                return cachedBitrate;
+            }
+            
+            // 如果音频有duration，尝试从文件大小和时长计算
+            if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
+                // 尝试获取文件大小
+                this.fetchFileSizeAndCalculate(entry.uri, audio.duration);
+                return 0; // 异步计算，先返回0
+            }
+            
+            // 根据文件扩展名返回合理的默认值
+            const ext = entry.name.split('.').pop().toLowerCase();
+            const defaultBitrates = {
+                'mp3': 320000,      // MP3 高品质默认320kbps
+                'aac': 256000,      // AAC 默认256kbps
+                'ogg': 320000,      // OGG 默认320kbps
+                'opus': 192000,     // Opus 默认192kbps
+                'flac': 1000000,    // FLAC 默认~1000kbps (1 Mbps)
+                'wav': 1411000,     // WAV 16-bit/44.1kHz 1411kbps (1.4 Mbps)
+                'm4a': 256000,      // M4A 默认256kbps
+                'aif': 1411000,     // AIFF 16-bit/44.1kHz 1411kbps (1.4 Mbps)
+                'aiff': 1411000,    // AIFF 16-bit/44.1kHz 1411kbps (1.4 Mbps)
+                'alac': 1000000,    // ALAC 默认~1000kbps (1 Mbps)
+                'dsd': 2822400,     // DSD 2.8MHz 2822kbps (2.8 Mbps)
+                'dsf': 2822400,     // DSD 2.8MHz 2822kbps (2.8 Mbps)
+                'dff': 2822400,     // DSD 2.8MHz 2822kbps (2.8 Mbps)
+                'ape': 1000000      // APE 默认~1000kbps (1 Mbps)
+            };
+            
+            const defaultBitrate = defaultBitrates[ext] || 128000;
+            console.log('Using default bitrate for', ext, ':', defaultBitrate, 'bps');
+            return defaultBitrate;
+            
+        } catch (e) {
+            console.warn('Failed to calculate bitrate from audio:', e);
+            return 0;
+        }
+    },
+
+    async fetchFileSizeAndCalculate(uri, duration) {
+        try {
+            const response = await fetch(uri, { method: 'HEAD' });
+            const contentLength = response.headers.get('content-length');
+            
+            if (contentLength && duration > 0) {
+                const fileSize = parseInt(contentLength);
+                const bitrate = Math.round((fileSize * 8) / duration);
+                
+                console.log('Calculated bitrate from file size:', fileSize, 'bytes, duration:', duration, 'seconds, bitrate:', bitrate, 'bps');
+                
+                if (bitrate > 0) {
+                    this.currentBitrate = bitrate;
+                    this.bitrateCache.set(uri, bitrate);
+                    
+                    const bitrateDisplay = document.querySelector('.mmp-bitrate');
+                    if (bitrateDisplay && this.cfg.show_bitrate) {
+                        bitrateDisplay.textContent = this.formatBitrateWithUnits(bitrate);
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to fetch file size:', e);
+        }
+    },
+
     async ensureAudioPlayable(audio) {
         try {
-            await audio.play()
-            this.retryCount = 0
+            await audio.play();
+            this.retryCount = 0;
         } catch (e) {
             if (this.retryCount < 2) {
-                this.retryCount++
-                await new Promise(resolve => setTimeout(resolve, 500))
-                return this.ensureAudioPlayable(audio)
+                this.retryCount++;
+                await new Promise(resolve => setTimeout(resolve, 500));
+                return this.ensureAudioPlayable(audio);
             }
-            throw e
+            throw e;
         }
     },
 
     async startCacheProbe(originalUri) {
-        if (this.loadedFromCache || !this.cfg.cache_check || !this.needTranscodeFormats.test(originalUri)) return
+        if (this.loadedFromCache || !this.cfg.cache_check || !this.needTranscodeFormats.test(originalUri)) return;
         
         if (this.cacheProbeInterval) {
-            clearInterval(this.cacheProbeInterval)
+            clearInterval(this.cacheProbeInterval);
         }
         
         this.cacheProbeInterval = setInterval(async () => {
             try {
-                const cacheInfo = await this.checkCachedVersion(originalUri)
+                const cacheInfo = await this.checkCachedVersion(originalUri);
                 if (cacheInfo) {
-                    await this.switchToCachedVersion(cacheInfo)
-                    clearInterval(this.cacheProbeInterval)
-                    this.cacheProbeInterval = null
+                    await this.switchToCachedVersion(cacheInfo);
+                    clearInterval(this.cacheProbeInterval);
+                    this.cacheProbeInterval = null;
                 }
             } catch (e) {}
-        }, 5000)
+        }, 5000);
     },
 
     async switchToCachedVersion(cacheInfo) {
-        if (!this.audioElement || !cacheInfo) return
+        if (!this.audioElement || !cacheInfo) return;
         
-        const audio = this.audioElement
-        const progressBar = document.querySelector('.mmp-progress-bar')
-        const currentTime = audio.currentTime
-        const currentVolume = audio.volume
-        const wasPlaying = !audio.paused
+        const audio = this.audioElement;
+        const progressBar = document.querySelector('.mmp-progress-bar');
+        const currentTime = audio.currentTime;
+        const currentVolume = audio.volume;
+        const wasPlaying = !audio.paused;
         
         try {
-            audio.pause()
-            audio.src = cacheInfo.cachedUri
-            this.isTranscoded = false
-            this.loadedFromCache = true
+            audio.pause();
+            audio.src = cacheInfo.cachedUri;
+            this.isTranscoded = false;
+            this.loadedFromCache = true;
             
             await new Promise((resolve) => {
                 if (audio.readyState >= 3) {
-                    resolve()
+                    resolve();
                 } else {
-                    audio.oncanplay = resolve
-                    setTimeout(resolve, 1000)
+                    audio.oncanplay = resolve;
+                    setTimeout(resolve, 1000);
                 }
-            })
+            });
             
-            audio.currentTime = currentTime
-            audio.volume = currentVolume
+            audio.currentTime = currentTime;
+            audio.volume = currentVolume;
             
             audio.ontimeupdate = () => {
-                const timeDisplay = document.querySelector('.mmp-time')
+                const timeDisplay = document.querySelector('.mmp-time');
+                const bitrateDisplay = document.querySelector('.mmp-bitrate');
+                
                 if (timeDisplay) {
                     if (audio.duration && isFinite(audio.duration)) {
                         if (this.cfg.show_countdown && window.innerWidth <= 600) {
-                            timeDisplay.textContent = `-${this.formatTime(audio.duration - audio.currentTime)}`
-                            timeDisplay.className = 'mmp-time countdown'
+                            timeDisplay.textContent = `-${this.formatTime(audio.duration - audio.currentTime)}`;
+                            timeDisplay.className = 'mmp-time countdown';
                         } else {
-                            timeDisplay.textContent = `${this.formatTime(audio.currentTime)} / ${this.formatTime(audio.duration)}`
-                            timeDisplay.className = 'mmp-time normal-time'
+                            timeDisplay.textContent = `${this.formatTime(audio.currentTime)} / ${this.formatTime(audio.duration)}`;
+                            timeDisplay.className = 'mmp-time normal-time';
                         }
                     } else {
-                        timeDisplay.textContent = `${this.formatTime(audio.currentTime)}`
-                        timeDisplay.className = 'mmp-time normal-time'
+                        timeDisplay.textContent = `${this.formatTime(audio.currentTime)}`;
+                        timeDisplay.className = 'mmp-time normal-time';
                     }
+                }
+                
+                // 更新比特率显示
+                if (bitrateDisplay && this.cfg.show_bitrate && this.currentBitrate > 0) {
+                    bitrateDisplay.textContent = this.formatBitrateWithUnits(this.currentBitrate);
                 }
                 
                 if (progressBar && !this.isDragging) {
                     if (audio.duration && isFinite(audio.duration)) {
-                        progressBar.value = (audio.currentTime / audio.duration) * 10000
-                        progressBar.disabled = false
+                        progressBar.value = (audio.currentTime / audio.duration) * 10000;
+                        progressBar.disabled = false;
                     } else {
-                        progressBar.value = 0
-                        progressBar.disabled = true
+                        progressBar.value = 0;
+                        progressBar.disabled = true;
                     }
                 }
-            }
+            };
             
             if (wasPlaying) {
-                await audio.play()
+                await audio.play();
             }
         } catch (e) {
-            audio.src = this.currentPlayingUri
-            audio.currentTime = currentTime
-            audio.volume = currentVolume
+            audio.src = this.currentPlayingUri;
+            audio.currentTime = currentTime;
+            audio.volume = currentVolume;
             if (wasPlaying) {
-                await audio.play()
+                await audio.play();
             }
-            throw e
+            throw e;
         }
     },
 
     async checkCachedVersion(originalUri) {
-        if (!this.cfg.cache_check) return null
+        if (!this.cfg.cache_check) return null;
         
         try {
-            const decodedUri = decodeURIComponent(originalUri)
-            const fileName = decodedUri.split('/').pop()
-            const baseName = fileName.replace(/\.[^/.]+$/, "")
+            const decodedUri = decodeURIComponent(originalUri);
+            const fileName = decodedUri.split('/').pop();
+            const baseName = fileName.replace(/\.[^/.]+$/, "");
             
-            const baseUri = originalUri.replace(/\/[^/]+$/, '')
+            const baseUri = originalUri.replace(/\/[^/]+$/, '');
             
-            const flacUri = `${baseUri}/cache/${encodeURIComponent(baseName)}.flac`
-            const flacExists = await this.checkFileExists(flacUri)
-            if (flacExists) return { cachedUri: flacUri, originalUri }
+            const flacUri = `${baseUri}/cache/${encodeURIComponent(baseName)}.flac`;
+            const flacExists = await this.checkFileExists(flacUri);
+            if (flacExists) return { cachedUri: flacUri, originalUri };
             
-            const wavUri = `${baseUri}/cache/${encodeURIComponent(baseName)}.wav`
-            const wavExists = await this.checkFileExists(wavUri)
-            if (wavExists) return { cachedUri: wavUri, originalUri }
+            const wavUri = `${baseUri}/cache/${encodeURIComponent(baseName)}.wav`;
+            const wavExists = await this.checkFileExists(wavUri);
+            if (wavExists) return { cachedUri: wavUri, originalUri };
             
-            return null
+            return null;
         } catch (e) {
-            return null
+            return null;
         }
     },
 
     async checkFileExists(uri) {
         try {
-            const res = await fetch(uri, { method: 'HEAD' })
-            return res.ok
+            const res = await fetch(uri, { method: 'HEAD' });
+            return res.ok;
         } catch {
-            return false
+            return false;
         }
     },
 
     showError(message) {
-        const title = document.querySelector('.mmp-title')
+        const title = document.querySelector('.mmp-title');
         if (title) {
-            title.textContent = `[ERR] ${this.currentPlayingName}: ${message}`
-            title.style.color = 'var(--bad)'
+            title.textContent = `[ERR] ${this.currentPlayingName}: ${message}`;
+            title.style.color = 'var(--bad)';
             setTimeout(() => {
-                if (title) title.style.color = ''
-            }, 5000)
+                if (title) title.style.color = '';
+            }, 5000);
         }
     },
 
     updateLoadingProgress(percent) {
-        const loadingIndicator = document.querySelector('.mmp-loading-indicator')
+        const loadingIndicator = document.querySelector('.mmp-loading-indicator');
         if (loadingIndicator) {
-            loadingIndicator.style.width = `${percent}%`
-            loadingIndicator.style.display = percent > 0 && percent < 100 ? 'block' : 'none'
+            loadingIndicator.style.width = `${percent}%`;
+            loadingIndicator.style.display = percent > 0 && percent < 100 ? 'block' : 'none';
         }
     },
 
     setupAudioBindings() {
-        const audio = this.audioElement
-        if (!audio) return
+        const audio = this.audioElement;
+        if (!audio) return;
 
         document.addEventListener('keydown', (e) => {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
             
-            const playerVisible = document.getElementById('mmp-audio')?.style.display === 'flex'
-            const isPlaying = this.isPlaying
+            const playerVisible = document.getElementById('mmp-audio')?.style.display === 'flex';
+            const isPlaying = this.isPlaying;
             
             switch(e.key) {
                 case ' ':
                     if (playerVisible) {
-                        e.preventDefault()
-                        this.togglePlay()
+                        e.preventDefault();
+                        this.togglePlay();
                     }
-                    break
+                    break;
                 case 'ArrowRight':
                     if (playerVisible && isPlaying) {
                         if (e.ctrlKey) {
                             if (audio.duration && isFinite(audio.duration) && !this.isTranscoded) {
-                                audio.currentTime = Math.min(audio.duration, audio.currentTime + 5)
+                                audio.currentTime = Math.min(audio.duration, audio.currentTime + 5);
                             }
                         } else {
-                            setTimeout(() => this.playNext(), 300)
+                            setTimeout(() => this.playNext(), 300);
                         }
                     }
-                    break
+                    break;
                 case 'ArrowLeft':
                     if (playerVisible && isPlaying) {
                         if (e.ctrlKey) {
                             if (audio.duration && isFinite(audio.duration) && !this.isTranscoded) {
-                                audio.currentTime = Math.max(0, audio.currentTime - 5)
+                                audio.currentTime = Math.max(0, audio.currentTime - 5);
                             }
                         } else {
-                            setTimeout(() => this.playPrev(), 300)
+                            setTimeout(() => this.playPrev(), 300);
                         }
                     }
-                    break
+                    break;
                 case 'ArrowUp':
-                    if (playerVisible) this.adjustVolume(1)
-                    break
+                    if (playerVisible) this.adjustVolume(1);
+                    break;
                 case 'ArrowDown':
-                    if (playerVisible) this.adjustVolume(-1)
-                    break
+                    if (playerVisible) this.adjustVolume(-1);
+                    break;
                 case 'Escape':
-                    if (playerVisible) this.stop()
-                    break
+                    if (playerVisible) this.stop();
+                    break;
             }
-        })
+        });
     },
 
     formatTime(seconds) {
-        if (isNaN(seconds)) return '0:00'
-        const mins = Math.floor(seconds / 60)
-        const secs = Math.floor(seconds % 60).toString().padStart(2, '0')
-        return `${mins}:${secs}`
+        if (isNaN(seconds)) return '0:00';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60).toString().padStart(2, '0');
+        return `${mins}:${secs}`;
     },
 
     playNext() {
-        if (!this.playlist.length) return
+        if (!this.playlist.length) return;
         
         if (this.cfg.loop_mode === 'none' && this.index >= this.playlist.length - 1) {
-            this.stop()
-            return
+            this.stop();
+            return;
         }
         
-        this.index = (this.index + 1) % this.playlist.length
-        this.play(this.playlist[this.index])
+        this.index = (this.index + 1) % this.playlist.length;
+        this.play(this.playlist[this.index]);
     },
 
     playPrev() {
-        if (!this.playlist.length) return
+        if (!this.playlist.length) return;
         
         if (this.cfg.loop_mode === 'none' && this.index <= 0) {
-            this.stop()
-            return
+            this.stop();
+            return;
         }
         
-        this.index = (this.index - 1 + this.playlist.length) % this.playlist.length
-        this.play(this.playlist[this.index])
+        this.index = (this.index - 1 + this.playlist.length) % this.playlist.length;
+        this.play(this.playlist[this.index]);
     },
 
     togglePlay() {
-        const audio = this.audioElement
-        if (!audio) return
+        const audio = this.audioElement;
+        if (!audio) return;
 
         if (audio.paused) {
-            audio.play()
+            audio.play();
         } else {
-            audio.pause()
+            audio.pause();
         }
     },
 
     pause() {
-        const audio = this.audioElement
-        if (!audio) return
-        audio.pause()
+        const audio = this.audioElement;
+        if (!audio) return;
+        audio.pause();
     },
 
     adjustVolume(change) {
-        const audio = this.audioElement
-        if (!audio) return
+        const audio = this.audioElement;
+        if (!audio) return;
         
-        let newVol = Math.round(audio.volume * 100) + change
-        newVol = Math.max(0, Math.min(100, newVol)) / 100
+        let newVol = Math.round(audio.volume * 100) + change;
+        newVol = Math.max(0, Math.min(100, newVol)) / 100;
         
-        audio.volume = newVol
-        this.cfg.audio_vol = newVol
-        localStorage.setItem('mmp_volume', newVol.toString())
+        audio.volume = newVol;
+        this.cfg.audio_vol = newVol;
+        localStorage.setItem('mmp_volume', newVol.toString());
         
-        const volDisplay = document.querySelector('.mmp-volume-value')
-        if (volDisplay) volDisplay.textContent = `${Math.round(newVol * 100)}%`
+        const volDisplay = document.querySelector('.mmp-volume-value');
+        if (volDisplay) volDisplay.textContent = `${Math.round(newVol * 100)}%`;
     },
 
     stop() {
-        const root = document.getElementById('mmp-audio')
-        if (!root) return
+        const root = document.getElementById('mmp-audio');
+        if (!root) return;
 
         if (this.cacheProbeInterval) {
-            clearInterval(this.cacheProbeInterval)
-            this.cacheProbeInterval = null
+            clearInterval(this.cacheProbeInterval);
+            this.cacheProbeInterval = null;
         }
 
-        const audio = this.audioElement
-        const title = root.querySelector('.mmp-title')
+        const audio = this.audioElement;
+        const title = root.querySelector('.mmp-title');
+        const bitrateDisplay = root.querySelector('.mmp-bitrate');
 
-        root.style.display = 'none'
-        audio.pause()
-        audio.src = ''
+        root.style.display = 'none';
+        audio.pause();
+        audio.src = '';
         if (title) {
-            title.innerText = ''
-            title.style.color = ''
+            title.innerText = '';
+            title.style.color = '';
         }
-        this.isPlaying = false
-        this.isDragging = false
-        this.ffmpegAttempted = false
-        this.isTranscoded = false
-        this.loadedFromCache = false
-        this.currentPlayingUri = ''
-        this.currentPlayingName = ''
+        if (bitrateDisplay) {
+            bitrateDisplay.textContent = '';
+        }
+        this.isPlaying = false;
+        this.isDragging = false;
+        this.ffmpegAttempted = false;
+        this.isTranscoded = false;
+        this.loadedFromCache = false;
+        this.currentPlayingUri = '';
+        this.currentPlayingName = '';
+        // 注意：不重置currentBitrate，因为它是缓存的
     }
 }
 
-MMP.init()
+MMP.init();

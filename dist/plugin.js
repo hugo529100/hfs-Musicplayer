@@ -1,5 +1,5 @@
 exports.description = "A clean and pure music player that plays directly when clicking file icons."
-exports.version = 4.8
+exports.version = 5.0
 exports.apiRequired = 9.5
 exports.repo = "Hug3O/Musicplayer+"
 exports.frontend_css = "style.css"
@@ -44,6 +44,12 @@ exports.config = {
     show_progress: {
         frontend: true,
         label: "Show progress bar",
+        type: 'boolean',
+        defaultValue: true
+    },
+    show_bitrate: {
+        frontend: true,
+        label: "Show bitrate information",
         type: 'boolean',
         defaultValue: true
     },

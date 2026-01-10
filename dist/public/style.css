@@ -52,6 +52,24 @@
     min-height: 1.6em;
 }
 
+/* 比特率显示样式 */
+.mmp-bitrate {
+    font-size: 0.8em;
+    min-width: 4.5em;
+    text-align: center;
+    flex-shrink: 0;
+    padding: 0 3px;
+    margin-right: 0.3em;
+    line-height: 1.2;
+    border: 1px solid var(--good-contrast);
+    color: var(--text);
+    border-radius: 0.4em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 1.6em;
+}
+
 .mmp-title-container {
     flex-grow: 1;
     min-width: 0;
@@ -167,8 +185,8 @@
 /*進度跳針寬度*/
 .mmp-progress-bar::-webkit-slider-thumb {
     appearance: none;
-    width: 5px;
-    height: 1.8em;
+    width: 0.3em;
+    height: 1.9em;
     background: var(--thumb-color);
     cursor: pointer;
     border-radius: 0;
@@ -176,8 +194,8 @@
 }
 
 .mmp-progress-bar::-moz-range-thumb {
-    width: 5px;
-    height: 1.8em;
+    width: 0.3em;
+    height: 1.9em;
     background: var(--thumb-color);
     cursor: pointer;
     border-radius: 0;
@@ -185,12 +203,14 @@
 }
 
 .mmp-progress-bar:hover::-webkit-slider-thumb {
-    width: 5px;
+    width: 0.3em;
+    height: 1.9em;
     background: var(--text);
 }
 
 .mmp-progress-bar:hover::-moz-range-thumb {
-    width: 5px;
+    width: 0.3em;
+    height: 1.9em;
     background: var(--text);
 }
 
@@ -327,6 +347,9 @@ button.mmp-play {
         min-width: 4.5em;
         min-height: 1.6em;
     }
+    .mmp-bitrate {
+        display: none; 
+    }
     .mmp-title {
         text-align: left;
     }
@@ -347,12 +370,24 @@ button.mmp-play {
         min-height: 1.6em;
         min-width: 7em;
     }
+    .mmp-bitrate {
+        position: absolute;
+        left: 8.5em; /* 在时间显示右侧 */
+        margin-right: 0;
+        min-height: 1.6em;
+    }
     .mmp-title-container {
         max-width: 60%;
     }
     .mmp-header-controls {
         position: absolute;
         right: 0.5em;
+    }
+}
+
+@media (max-width: 600px) {
+    .mmp-bitrate {
+        display: none; /* 小屏幕时隐藏比特率显示 */
     }
 }
 
