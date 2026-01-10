@@ -1,8 +1,12 @@
 Musicplayer+
 A clean and pure music player that plays directly when clicking file icons.
-![IMG_20250522_220706](https://github.com/user-attachments/assets/da8d13fb-d3f7-4fdd-9474-e3c1f044b271)
-![IMG_20250522_220727](https://github.com/user-attachments/assets/62e50547-bc68-455f-88b9-91c5c41730b1)
-![Screenshot_2025-05-22-22-09-06-721_com android chrome](https://github.com/user-attachments/assets/af3cd8e8-b3ba-440c-aab0-ccd2d9f58b03)
-![Screenshot_2025-05-22-22-10-02-862_com android chrome](https://github.com/user-attachments/assets/68a86d49-2703-4f9f-b28a-b5dd5bf9193b)
-![Screenshot_2025-05-22-22-10-05-626_com android chrome](https://github.com/user-attachments/assets/405ceb9a-9091-4f3a-b21b-a571d6f0dfdf)
-![Uploading Screenshot_2025-05-22-22-09-26-255_com.android.chrome.jpg…]()
+
+
+![Screenshot_2026-01-10-12-45-57-861_com android chrome](https://github.com/user-attachments/assets/79788959-5063-4777-a903-e7b7d780f1b1)
+![Screenshot_2026-01-10-12-46-01-872_com android chrome](https://github.com/user-attachments/assets/d9d3d8fc-0bca-4174-8740-0c228b18df19)
+![Screenshot_2026-01-10-12-45-40-827_com android chrome](https://github.com/user-attachments/assets/8a3de735-27db-4790-9290-9b2b00143b82)
+![Screenshot_2026-01-10-12-45-27-574_com android chrome](https://github.com/user-attachments/assets/e73bcc83-56de-4532-a974-368ca64081bb)
+![Screenshot_2026-01-10-12-45-20-255_com android chrome](https://github.com/user-attachments/assets/3855248a-9076-4b93-9e4a-b8b54680a00f)
+![Screenshot_2026-01-10-12-45-09-834_com android chrome](https://github.com/user-attachments/assets/0611c7f2-71e1-4357-bd71-f1739b38fb74)
+![IMG_20260110_124820](https://github.com/user-attachments/assets/b4120987-3c27-4bfd-8b80-f74aa74e2dd5)
+![IMG_20260110_124754](https://github.com/user-attachments/assets/b5561b3c-8175-43fd-b35b-f651c2285e11)
