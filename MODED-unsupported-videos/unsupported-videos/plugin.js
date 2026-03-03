@@ -1,4 +1,4 @@
-exports.version = 3.2;
+exports.version = 3.3;
 exports.apiRequired = 12.91;
 exports.description = "Optimized media player with intelligent gradient transcoding and high-quality DSD/DSF support";
 exports.repo = "Hug3O/Unsupported-videos";
@@ -12,7 +12,7 @@ const TEMP_PREFIX = 'tmp_';
 const MIN_FILE_SIZE = 1024;
 const WAV_MIN_SIZE = 1024 * 1024;
 const FLAC_HEADER = Buffer.from('664c6143', 'hex');
-const SUPPORTED_AUDIO_EXTS = ['mp3','flac','m4a','ogg','wma','aiff','aif','alac','dsd','dsf','dff','ape','wav'];
+const SUPPORTED_AUDIO_EXTS = ['mp3','flac','m4a','ogg','opus','wma','aiff','aif','alac','dsd','dsf','dff','ape','wav'];
 const SUPPORTED_VIDEO_EXTS = ['webm','avi','mkv','mp4','mov','mpg','wmv','ts','rmvb','rm','dat','vob','flv'];
 const PROCESS_CLEANUP_TIMEOUT = 5000; // Timeout for process cleanup (5 seconds)
 
