@@ -27,7 +27,7 @@ if (cfg.use_file_list) {
 const MMP = {
     cfg,
     audio_formats: cfg.lossless_formats 
-        ? /\.(aac|flac|mka|mp3|ogg|opus|wav|m4a|aif|aiff|alac|dsd|dsf|dff|ape)$/i
+        ? /\.(aac|flac|mka|mp3|ogg|opus|wav|wma|m4a|aif|aiff|alac|dsd|dsf|dff|ape)$/i
         : /\.(aac|flac|mka|mp3|ogg|opus|wav|m4a)$/i,
     needTranscodeFormats: /\.(dsd|dsf|dff|aif|aiff|ape|alac)$/i,
     playlist: [],

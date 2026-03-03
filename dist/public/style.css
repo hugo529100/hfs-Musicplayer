@@ -454,3 +454,16 @@ min-height: 1.6em;
             border: 1px solid ButtonText !important;
         }
     }
+
+/* 觸摸設備的特殊處理 */
+@media (hover: none) and (pointer: coarse) {
+    .mmp-playback-buttons button:active {
+        background-color: var(--faint-contrast);
+        transition: background-color 0.1s ease;
+    }
+    
+    .mmp-playback-buttons button:not(:active) {
+        background-color: var(--button-bg);
+    }
+}
+
