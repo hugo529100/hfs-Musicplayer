@@ -1,5 +1,5 @@
 exports.description = "A clean and pure music player that plays directly when clicking file icons."
-exports.version = 5.3
+exports.version = 5.5
 exports.apiRequired = 9.5
 exports.repo = "Hug3O/Musicplayer+"
 exports.frontend_css = "style.css"
@@ -42,7 +42,7 @@ exports.config = {
         placeholder: "default: 4vw"
     },
     show_progress: {
-        frontend: true,
+        frontend: false, // 改为 false，不在后台显示
         label: "Show progress bar",
         type: 'boolean',
         defaultValue: true
@@ -85,25 +85,6 @@ exports.config = {
         helperText: "Cache playlists and audio files locally to reduce network requests and traffic. Uses IndexedDB for audio storage.",
         type: 'boolean',
         defaultValue: true
-    },
-    max_cache_size: {
-        frontend: false,
-        label: "Maximum cache size (MB)",
-        helperText: "Maximum size for audio cache storage. Recommended: 100-500 MB",
-        type: 'number',
-        min: 10,
-        max: 10240,
-        defaultValue: 1024,
-        placeholder: "default: 1024"
-    },
-    cache_expiry_hours: {
-        frontend: false,
-        label: "Cache expiry time (hours)",
-        helperText: "How long to keep cached files before refreshing",
-        type: 'number',
-        min: 1,
-        max: 168,
-        defaultValue: 24,
-        placeholder: "default: 24"
     }
+    // 已移除 max_cache_size 和 cache_expiry_hours 配置项
 }

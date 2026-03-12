@@ -1,9 +1,94 @@
 const { h, t } = HFS
 const cfg = HFS.getPluginConfig()
 
+// 前端播放器接管开关的存储键名
+const PLAYER_OVERRIDE_STORAGE_KEY = 'mmp_player_override_enabled'
+
+// 检查 localStorage 是否支持
+const isLocalStorageSupported = () => {
+  try {
+    localStorage.setItem('test', '1');
+    localStorage.removeItem('test');
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
+// 获取播放器接管状态（默认为 true - 开启）
+const getPlayerOverrideState = () => {
+  if (!isLocalStorageSupported()) return true;
+  const val = localStorage.getItem(PLAYER_OVERRIDE_STORAGE_KEY);
+  return val === null ? true : val === 'true';
+};
+
+// 保存播放器接管状态
+const setPlayerOverrideState = (value) => {
+  if (isLocalStorageSupported()) {
+    localStorage.setItem(PLAYER_OVERRIDE_STORAGE_KEY, value ? 'true' : 'false');
+  }
+};
+
+// 全局变量保存播放器接管状态
+let playerOverrideEnabled = getPlayerOverrideState();
+
 const isAppleDevice = /iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent) && !window.MSStream
 const unsupportedPlugin = HFS.plugins['unsupported-videos'] || HFS.plugins['unsupported-videos']
 
+// 在 Options 界面添加播放器接管开关
+function insertPlayerOverrideToggle() {
+  const optionsDialog = document.querySelector('.dialog[aria-modal="true"]');
+  if (!optionsDialog || document.getElementById('mmp-player-override-toggle')) return;
+
+  // 检查后台 auto_play 是否启用
+  if (!cfg.auto_play) return;
+
+  const themeSelect = document.getElementById('option-theme');
+  if (!themeSelect) return;
+
+  // 创建开关元素
+  const toggleHTML = `
+    <div id="mmp-player-override-toggle" style="display:block;margin-top:1em">
+      <label style="display:block;cursor:pointer">
+        <input type="checkbox" id="mmp-player-override-checkbox">
+        Use Musicplayer+
+      </label>
+      <small style="display:block;color:var(--color-2);margin-top:0.25em">Take control of the default audio player</small>
+    </div>
+  `;
+
+  // 插入到 theme 选择器后面
+  themeSelect.insertAdjacentHTML('afterend', toggleHTML);
+
+  // 设置初始状态
+  const checkbox = document.getElementById('mmp-player-override-checkbox');
+  checkbox.checked = playerOverrideEnabled;
+
+  // 添加事件监听
+  checkbox.addEventListener('change', (e) => {
+    playerOverrideEnabled = e.target.checked;
+    setPlayerOverrideState(playerOverrideEnabled);
+    
+    // 可以在这里添加提示信息
+    console.log(`Player override ${playerOverrideEnabled ? 'enabled' : 'disabled'}`);
+  });
+}
+
+// 监听 Options 对话框的出现
+function setupOptionsObserver() {
+  const observer = new MutationObserver((mutations) => {
+    if (document.querySelector('.dialog-title')?.textContent?.includes('Options')) {
+      setTimeout(insertPlayerOverrideToggle, 100);
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+}
+
+// 原有的 fileMenu 事件处理 - 添加状态检查
 if (cfg.use_file_menu) {
     HFS.onEvent('fileMenu', ({ entry }) =>
         MMP.audio_formats.test(entry.uri)
@@ -11,6 +96,7 @@ if (cfg.use_file_menu) {
     )
 }
 
+// 原有的 fileList 事件处理 - 添加状态检查
 if (cfg.use_file_list) {
     HFS.onEvent('afterEntryName', ({ entry }, { setOrder }) => {
         setOrder(-1)
@@ -54,9 +140,17 @@ const MMP = {
     db: null,
     isDbInitialized: false,
     currentBitrate: 0,
-    bitrateCache: new Map(), // 新增：缓存比特率
+    bitrateCache: new Map(),
 
     async init() {
+        // 设置 Options 对话框观察器
+        setupOptionsObserver();
+        
+        // 只在播放器接管启用时注册点击事件
+        if (cfg.auto_play && playerOverrideEnabled) {
+            document.addEventListener('click', this.handleFileClick.bind(this), true)
+        }
+        
         const savedVol = localStorage.getItem('mmp_volume')
         if (savedVol) {
             this.cfg.audio_vol = parseFloat(savedVol)
@@ -72,16 +166,29 @@ const MMP = {
         
         this.initPlayerElement()
         this.setupAudioBindings()
-        this.setupClickIcons()
+        
+        // 只在播放器接管启用时设置点击图标
+        if (cfg.auto_play && playerOverrideEnabled) {
+            this.setupClickIcons()
+        }
         
         if (window.HFS && HFS.onEvent) {
             HFS.onEvent('configChanged', (newCfg) => {
                 this.cfg = { ...this.cfg, ...newCfg }
                 document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
+                
+                // 当配置变化时，重新检查 auto_play 状态和播放器接管状态
+                if (this.cfg.auto_play) {
+                    // 如果 auto_play 启用，需要检查是否显示开关
+                    setTimeout(insertPlayerOverrideToggle, 100);
+                }
             })
             
             HFS.onEvent('afterList', () => {
-                this.setupClickIcons()
+                // 只在播放器接管启用时设置点击图标
+                if (cfg.auto_play && playerOverrideEnabled) {
+                    this.setupClickIcons()
+                }
                 if (this.isPlaying) {
                     document.getElementById('mmp-audio').style.display = 'flex'
                 }
@@ -103,6 +210,43 @@ const MMP = {
         }
     },
 
+    handleFileClick(e) {
+        // 检查播放器接管是否启用
+        if (!cfg.auto_play || !playerOverrideEnabled) return;
+        
+        // 查找是否点击了文件列表中的元素
+        const target = e.target.closest('li.file a[href], li.file span.icon, li.file .mmp-audio-icon, li.file .mmp-play')
+        if (!target) return
+        
+        const li = target.closest('li.file')
+        if (!li) return
+        
+        const nameElement = li.querySelector('a[href]')
+        if (!nameElement) return
+        
+        const fileName = nameElement.textContent.trim()
+        if (!this.audio_formats.test(fileName)) return
+        
+        // 检查是否启用了自动播放
+        if (!this.cfg.auto_play) return
+        
+        // 阻止默认行为和事件冒泡
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        e.stopPropagation()
+        
+        // 获取 entry 信息
+        const entry = this.findEntryByName(fileName) || { 
+            name: fileName, 
+            uri: nameElement.href 
+        }
+        
+        // 播放音频
+        this.audio(entry)
+        
+        return false
+    },
+
     async initIndexedDB() {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(this.dbName, this.dbVersion)
@@ -117,8 +261,7 @@ const MMP = {
                 this.db = request.result
                 this.isDbInitialized = true
                 console.log('IndexedDB for audio cache initialized')
-                
-                this.cleanupExpiredCache().then(resolve).catch(resolve)
+                resolve()
             }
             
             request.onupgradeneeded = (event) => {
@@ -126,7 +269,7 @@ const MMP = {
                 if (!db.objectStoreNames.contains('audioCache')) {
                     const store = db.createObjectStore('audioCache', { keyPath: 'uri' })
                     store.createIndex('timestamp', 'timestamp', { unique: false })
-                    store.createIndex('size', 'size', { unique: false })
+                    // 已移除 size 索引
                 }
             }
         })
@@ -143,19 +286,14 @@ const MMP = {
             request.onsuccess = () => {
                 const result = request.result
                 if (result) {
-                    const expiryTime = this.cfg.cache_expiry_hours * 3600000
-                    if (Date.now() - result.timestamp < expiryTime) {
-                        const blob = new Blob([result.data], { type: result.contentType })
-                        const blobUrl = URL.createObjectURL(blob)
-                        resolve({
-                            blobUrl,
-                            size: result.size,
-                            timestamp: result.timestamp
-                        })
-                    } else {
-                        this.removeCachedAudioFromDB(uri)
-                        resolve(null)
-                    }
+                    // 缓存永不过期 - 移除了过期时间检查
+                    const blob = new Blob([result.data], { type: result.contentType })
+                    const blobUrl = URL.createObjectURL(blob)
+                    resolve({
+                        blobUrl,
+                        size: result.size,
+                        timestamp: result.timestamp
+                    })
                 } else {
                     resolve(null)
                 }
@@ -186,7 +324,7 @@ const MMP = {
             const request = store.put(audioData)
             
             request.onsuccess = async () => {
-                await this.cleanupCacheBySize()
+                // 已移除缓存大小清理
                 resolve(true)
             }
             
@@ -210,87 +348,18 @@ const MMP = {
         })
     },
 
-    async cleanupExpiredCache() {
-        if (!this.isDbInitialized) return
-        
-        const expiryTime = this.cfg.cache_expiry_hours * 3600000
-        const cutoffTime = Date.now() - expiryTime
-        
-        return new Promise((resolve) => {
-            const transaction = this.db.transaction(['audioCache'], 'readwrite')
-            const store = transaction.objectStore('audioCache')
-            const index = store.index('timestamp')
-            const request = index.openCursor(IDBKeyRange.upperBound(cutoffTime))
-            
-            request.onsuccess = () => {
-                const cursor = request.result
-                if (cursor) {
-                    cursor.delete()
-                    cursor.continue()
-                } else {
-                    resolve()
-                }
-            }
-            
-            request.onerror = () => resolve()
-        })
-    },
+    // 已移除 cleanupExpiredCache 方法
 
-    async cleanupCacheBySize() {
-        if (!this.isDbInitialized) return
-        
-        return new Promise((resolve) => {
-            const transaction = this.db.transaction(['audioCache'], 'readonly')
-            const store = transaction.objectStore('audioCache')
-            const request = store.getAll()
-            
-            request.onsuccess = async () => {
-                const allItems = request.result
-                let totalSize = allItems.reduce((sum, item) => sum + item.size, 0)
-                const maxSize = this.cfg.max_cache_size * 1024 * 1024
-                
-                if (totalSize > maxSize) {
-                    allItems.sort((a, b) => a.timestamp - b.timestamp)
-                    
-                    const deletePromises = []
-                    for (let item of allItems) {
-                        if (totalSize <= maxSize) break
-                        
-                        deletePromises.push(this.removeCachedAudioFromDB(item.uri))
-                        totalSize -= item.size
-                    }
-                    
-                    await Promise.all(deletePromises)
-                }
-                resolve()
-            }
-            
-            request.onerror = () => resolve()
-        })
-    },
+    // 已移除 cleanupCacheBySize 方法
 
-    async getCacheSize() {
-        if (!this.isDbInitialized) return 0
-        
-        return new Promise((resolve) => {
-            const transaction = this.db.transaction(['audioCache'], 'readonly')
-            const store = transaction.objectStore('audioCache')
-            const request = store.getAll()
-            
-            request.onsuccess = () => {
-                const totalSize = request.result.reduce((sum, item) => sum + item.size, 0)
-                resolve(totalSize)
-            }
-            
-            request.onerror = () => resolve(0)
-        })
-    },
+    // 已移除 getCacheSize 方法
 
     async getCachedAudio(uri) {
         if (!this.cfg.enable_cache) return null
         
         const memoryCached = this.audioCache.get(uri)
         if (memoryCached && memoryCached.blobUrl) {
+            // 内存缓存保持1小时
             if (Date.now() - memoryCached.timestamp < 3600000) {
                 return memoryCached.blobUrl
             } else {
@@ -441,6 +510,9 @@ const MMP = {
     },
 
     setupClickIcons() {
+        // 检查播放器接管是否启用
+        if (!cfg.auto_play || !playerOverrideEnabled) return;
+        
         const bind = () => {
             document.querySelectorAll('li.file:not([data-mmp-bound])').forEach(li => {
                 const a = li.querySelector('a[href]')
@@ -454,15 +526,9 @@ const MMP = {
                 icon.style.cursor = 'pointer'
                 icon.title = 'Click to play'
 
-                icon.addEventListener('click', (e) => {
-                    if (!this.cfg.auto_play) return
-                    
-                    e.stopImmediatePropagation()
-                    e.preventDefault()
-                    
-                    const entry = this.findEntryByName(name) || { name, uri: a.href }
-                    this.audio(entry)
-                }, { capture: true })
+                // 移除旧的点击监听，防止重复
+                icon.removeEventListener('click', this.handleIconClick)
+                icon.addEventListener('click', this.handleIconClick.bind(this), { capture: true })
 
                 li.dataset.mmpBound = 'true'
             })
@@ -473,6 +539,27 @@ const MMP = {
         observer.observe(document.body, { childList: true, subtree: true })
     },
 
+    handleIconClick(e) {
+        // 检查播放器接管是否启用
+        if (!cfg.auto_play || !playerOverrideEnabled) return;
+        
+        if (!this.cfg.auto_play) return
+        
+        e.stopImmediatePropagation()
+        e.preventDefault()
+        
+        const li = e.target.closest('li.file')
+        if (!li) return
+        
+        const a = li.querySelector('a[href]')
+        const name = a?.textContent?.trim()
+        
+        if (name && this.audio_formats.test(name)) {
+            const entry = this.findEntryByName(name) || { name, uri: a.href }
+            this.audio(entry)
+        }
+    },
+
     findEntryByName(name) {
         const list = window.HFS?.state?.list || []
         return list.find(e => e.n === name)
@@ -481,13 +568,13 @@ const MMP = {
     initPlayerElement() {
         document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
         
-        const progressHTML = this.cfg.show_progress ? `
+        // 进度条始终显示，不受配置影响
+        const progressHTML = `
             <div class='mmp-progress-container'>
                 <input type="range" class='mmp-progress-bar' min="0" max="10000" value="0" step="1">
                 <div class='mmp-loading-indicator'></div>
-            </div>` : ''
+            </div>`
         
-        // 添加比特率显示的HTML
         const bitrateHTML = this.cfg.show_bitrate ? `
             <span class='mmp-bitrate'></span>
         ` : ''
@@ -546,56 +633,55 @@ const MMP = {
             }
         })
         
-        if (this.cfg.show_progress) {
-            const progressBar = document.querySelector('.mmp-progress-bar')
-            if (progressBar) {
-                const audio = this.audioElement
-                
-                progressBar.addEventListener('mousedown', () => {
-                    if (!this.isTranscoded) this.isDragging = true
-                })
+        // 进度条始终初始化
+        const progressBar = document.querySelector('.mmp-progress-bar')
+        if (progressBar) {
+            const audio = this.audioElement
+            
+            progressBar.addEventListener('mousedown', () => {
+                if (!this.isTranscoded) this.isDragging = true
+            })
 
-                progressBar.addEventListener('touchstart', () => {
-                    if (!this.isTranscoded) this.isDragging = true
-                }, { passive: true })
+            progressBar.addEventListener('touchstart', () => {
+                if (!this.isTranscoded) this.isDragging = true
+            }, { passive: true })
 
-                progressBar.addEventListener('input', (e) => {
-                    if (this.isDragging && audio?.duration && isFinite(audio.duration) && !this.isTranscoded) {
-                        const seekTime = (e.target.value / 10000) * audio.duration
-                        audio.currentTime = seekTime
-                    }
-                })
-
-                progressBar.addEventListener('mouseup', (e) => {
-                    if (!this.isTranscoded) {
-                        this.handleProgressChange(e)
-                        this.isDragging = false
-                    }
-                })
-
-                progressBar.addEventListener('touchend', (e) => {
-                    if (!this.isTranscoded) {
-                        this.handleProgressChange(e)
-                        this.isDragging = false
-                    }
-                }, { passive: true })
-
-                progressBar.addEventListener('touchmove', (e) => {
-                    if (this.isDragging && !this.isTranscoded) {
-                        e.preventDefault()
-                        const touch = e.touches[0]
-                        const rect = progressBar.getBoundingClientRect()
-                        const percent = Math.min(1, Math.max(0, (touch.clientX - rect.left) / rect.width))
-                        progressBar.value = percent * 10000
-                        if (audio?.duration && isFinite(audio.duration)) {
-                            audio.currentTime = percent * audio.duration
-                        }
-                    }
-                }, { passive: false })
-
-                if (audio) {
-                    audio.ontimeupdate = () => this.updateTimeDisplay(audio)
+            progressBar.addEventListener('input', (e) => {
+                if (this.isDragging && audio?.duration && isFinite(audio.duration) && !this.isTranscoded) {
+                    const seekTime = (e.target.value / 10000) * audio.duration
+                    audio.currentTime = seekTime
                 }
+            })
+
+            progressBar.addEventListener('mouseup', (e) => {
+                if (!this.isTranscoded) {
+                    this.handleProgressChange(e)
+                    this.isDragging = false
+                }
+            })
+
+            progressBar.addEventListener('touchend', (e) => {
+                if (!this.isTranscoded) {
+                    this.handleProgressChange(e)
+                    this.isDragging = false
+                }
+            }, { passive: true })
+
+            progressBar.addEventListener('touchmove', (e) => {
+                if (this.isDragging && !this.isTranscoded) {
+                    e.preventDefault()
+                    const touch = e.touches[0]
+                    const rect = progressBar.getBoundingClientRect()
+                    const percent = Math.min(1, Math.max(0, (touch.clientX - rect.left) / rect.width))
+                    progressBar.value = percent * 10000
+                    if (audio?.duration && isFinite(audio.duration)) {
+                        audio.currentTime = percent * audio.duration
+                    }
+                }
+            }, { passive: false })
+
+            if (audio) {
+                audio.ontimeupdate = () => this.updateTimeDisplay(audio)
             }
         }
     },
@@ -616,7 +702,6 @@ const MMP = {
                 timeDisplay.className = 'mmp-time normal-time'
             }
             
-            // 更新比特率显示
             if (bitrateDisplay && this.cfg.show_bitrate && this.currentBitrate > 0) {
                 bitrateDisplay.textContent = this.formatBitrateWithUnits(this.currentBitrate)
             }
@@ -630,7 +715,6 @@ const MMP = {
                 progressBar.disabled = true
             }
             
-            // 解码时清除比特率显示
             if (bitrateDisplay) {
                 bitrateDisplay.textContent = ''
             }
@@ -648,15 +732,11 @@ const MMP = {
     },
 
     formatBitrateWithUnits(bitrate) {
-        // 智能选择单位显示
         if (bitrate >= 1000000) {
-            // 大于等于1 Mbps，显示为 Mbps
             const mbps = bitrate / 1000000
             return `${mbps.toFixed(1)} Mbps`
         } else if (bitrate >= 1000) {
-            // 大于等于1 kbps，显示为 kbps
             const kbps = bitrate / 1000
-            // 如果超过999 kbps，显示一位小数
             if (kbps >= 100) {
                 return `${Math.round(kbps)} kbps`
             } else if (kbps >= 10) {
@@ -665,13 +745,11 @@ const MMP = {
                 return `${kbps.toFixed(1)} kbps`
             }
         } else {
-            // 小于1 kbps，显示为 bps
             return `${Math.round(bitrate)} bps`
         }
     },
 
     formatBitrate(bitrate) {
-        // 向后兼容的方法，统一使用kbps显示
         const kbps = Math.round(bitrate / 1000)
         return `${kbps} kbps`
     },
@@ -686,6 +764,9 @@ const MMP = {
     },
 
     async audio(entry) {
+        // 检查播放器接管是否启用
+        if (!cfg.auto_play || !playerOverrideEnabled) return;
+
         if (this.isRemoteControlled) return
 
         const folderUri = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/'
@@ -749,7 +830,6 @@ const MMP = {
             title.style.textOverflow = 'ellipsis'
         }
 
-        // 检查缓存中是否有比特率
         const cachedBitrate = this.bitrateCache.get(entry.uri)
         if (cachedBitrate) {
             this.currentBitrate = cachedBitrate
@@ -778,7 +858,6 @@ const MMP = {
                 this.loadedFromCache = true
                 console.log('Using cached audio:', entry.name)
                 
-                // 如果没有缓存的比特率，尝试获取
                 if (this.currentBitrate === 0) {
                     setTimeout(() => {
                         this.calculateAndCacheBitrate(audio, entry)
@@ -796,24 +875,20 @@ const MMP = {
                     this.loadedFromCache = true
                     if (progressBar) progressBar.disabled = false
                     
-                    // 如果没有缓存的比特率，尝试获取
                     if (this.currentBitrate === 0) {
                         setTimeout(() => {
                             this.calculateAndCacheBitrate(audio, entry)
                         }, 1000)
                     }
                 } else if (isSpecialFormat && unsupportedPlugin) {
-                    // 总是尝试 ffmpeg
                     audio.src = entry.uri + "?ffmpeg"
                     this.isTranscoded = true
                     this.ffmpegAttempted = true
                     
-                    // 转码时禁用进度条拖动
                     if (progressBar) {
                         progressBar.disabled = true
                     }
                     
-                    // 对于FFmpeg转码的音频，尝试从FFmpeg输出获取比特率
                     this.getBitrateFromFfmpeg(entry.uri)
                 } else {
                     if (this.cfg.enable_cache) {
@@ -822,7 +897,6 @@ const MMP = {
                             const arrayBuffer = await response.arrayBuffer()
                             const contentType = response.headers.get('content-type') || 'audio/mpeg'
                             
-                            // 尝试从文件解析比特率
                             this.tryParseBitrateFromFile(entry, arrayBuffer, contentType)
                             
                             const cachedUrl = await this.cacheAudio(entry.uri, arrayBuffer, contentType)
@@ -834,7 +908,6 @@ const MMP = {
                             }
                         } catch (fetchError) {
                             audio.src = entry.uri
-                            // 直接播放时也尝试计算比特率
                             if (this.currentBitrate === 0) {
                                 setTimeout(() => {
                                     this.calculateAndCacheBitrate(audio, entry)
@@ -843,7 +916,6 @@ const MMP = {
                         }
                     } else {
                         audio.src = entry.uri
-                        // 直接播放时尝试计算比特率
                         if (this.currentBitrate === 0) {
                             setTimeout(() => {
                                 this.calculateAndCacheBitrate(audio, entry)
@@ -876,7 +948,6 @@ const MMP = {
                     this.isTranscoded = false
                     audio.ontimeupdate = () => this.updateTimeDisplay(audio)
                     
-                    // 转码完成后尝试计算比特率
                     if (this.currentBitrate === 0) {
                         setTimeout(() => {
                             this.calculateAndCacheBitrate(audio, entry)
@@ -903,7 +974,6 @@ const MMP = {
                         progressBar.disabled = true
                     }
                     
-                    // 对于FFmpeg转码的音频，尝试从FFmpeg输出获取比特率
                     this.getBitrateFromFfmpeg(entry.uri)
                     
                     await this.ensureAudioPlayable(audio)
@@ -922,12 +992,10 @@ const MMP = {
                     this.startCacheProbe(entry.uri)
                 } catch (e2) {
                     this.showError("Cannot play this audio format")
-                    // 总是保持播放器可见
                     this.pause()
                 }
             } else {
                 this.showError("Cannot play this audio format")
-                // 总是保持播放器可见
                 this.pause()
             }
         }
@@ -966,18 +1034,13 @@ const MMP = {
         try {
             console.log('Attempting to get bitrate from FFmpeg for:', uri);
             
-            // 创建一个测试用的音频元素来获取FFmpeg处理的信息
             const testAudio = new Audio();
             testAudio.src = uri + "?ffmpeg&probe";
             
-            // 监听元数据加载事件
             testAudio.addEventListener('loadedmetadata', () => {
                 console.log('FFmpeg metadata loaded for:', uri);
                 
-                // 尝试从音频元素获取比特率信息
                 if (testAudio.duration && testAudio.duration > 0) {
-                    // 如果音频是通过FFmpeg处理的，可能已经包含了正确的时长信息
-                    // 我们可以尝试从文件大小和时长计算比特率
                     this.fetchFileSizeAndCalculateBitrate(uri, testAudio.duration);
                 }
             });
@@ -986,7 +1049,6 @@ const MMP = {
                 console.warn('Error loading FFmpeg probe:', e);
             });
             
-            // 预加载但不播放
             testAudio.load();
             
         } catch (e) {
@@ -1026,7 +1088,6 @@ const MMP = {
             
             const ext = entry.name.split('.').pop().toLowerCase();
             
-            // 根据文件类型尝试不同的解析方法
             switch(ext) {
                 case 'mp3':
                     this.parseMp3Bitrate(arrayBuffer, entry);
@@ -1037,7 +1098,6 @@ const MMP = {
                 case 'm4a':
                 case 'ogg':
                 case 'opus':
-                    // 对于这些格式，主要依赖文件大小和时长计算
                     console.log('Bitrate calculation for', ext, 'will be done from file size/duration');
                     break;
                 default:
@@ -1060,18 +1120,14 @@ const MMP = {
             
             const view = new DataView(arrayBuffer);
             
-            // 寻找MP3帧头
             for (let i = 0; i < Math.min(1000, arrayBuffer.byteLength - 4); i++) {
                 const header = view.getUint32(i);
                 
-                // 检查是否是有效的MP3帧头 (11个同步位)
                 if ((header & 0xFFE00000) === 0xFFE00000) {
                     console.log('Found MP3 frame header at position', i);
                     
-                    // 获取比特率索引（位16-19）
                     const bitrateIndex = (header >> 12) & 0x0F;
                     
-                    // MPEG 1 Layer 3 比特率表
                     const mpeg1Layer3Bitrates = [
                         0, 32, 40, 48, 56, 64, 80, 96, 
                         112, 128, 160, 192, 224, 256, 320, 0
@@ -1094,7 +1150,7 @@ const MMP = {
                         }
                     }
                     
-                    break; // 找到第一个有效帧头后就停止
+                    break;
                 }
             }
             
@@ -1105,7 +1161,7 @@ const MMP = {
     },
 
     calculateAndCacheBitrate(audio, entry) {
-        if (this.currentBitrate > 0) return; // 已经有比特率了
+        if (this.currentBitrate > 0) return;
         
         const bitrate = this.calculateBitrateFromAudio(audio, entry);
         if (bitrate > 0) {
@@ -1122,37 +1178,33 @@ const MMP = {
 
     calculateBitrateFromAudio(audio, entry) {
         try {
-            // 首先检查是否有缓存
             const cachedBitrate = this.bitrateCache.get(entry.uri);
             if (cachedBitrate) {
                 console.log('Returning cached bitrate:', cachedBitrate, 'bps');
                 return cachedBitrate;
             }
             
-            // 如果音频有duration，尝试从文件大小和时长计算
             if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
-                // 尝试获取文件大小
                 this.fetchFileSizeAndCalculate(entry.uri, audio.duration);
-                return 0; // 异步计算，先返回0
+                return 0;
             }
             
-            // 根据文件扩展名返回合理的默认值
             const ext = entry.name.split('.').pop().toLowerCase();
             const defaultBitrates = {
-                'mp3': 320000,      // MP3 高品质默认320kbps
-                'aac': 256000,      // AAC 默认256kbps
-                'ogg': 320000,      // OGG 默认320kbps
-                'opus': 192000,     // Opus 默认192kbps
-                'flac': 1000000,    // FLAC 默认~1000kbps (1 Mbps)
-                'wav': 1411000,     // WAV 16-bit/44.1kHz 1411kbps (1.4 Mbps)
-                'm4a': 256000,      // M4A 默认256kbps
-                'aif': 1411000,     // AIFF 16-bit/44.1kHz 1411kbps (1.4 Mbps)
-                'aiff': 1411000,    // AIFF 16-bit/44.1kHz 1411kbps (1.4 Mbps)
-                'alac': 1000000,    // ALAC 默认~1000kbps (1 Mbps)
-                'dsd': 2822400,     // DSD 2.8MHz 2822kbps (2.8 Mbps)
-                'dsf': 2822400,     // DSD 2.8MHz 2822kbps (2.8 Mbps)
-                'dff': 2822400,     // DSD 2.8MHz 2822kbps (2.8 Mbps)
-                'ape': 1000000      // APE 默认~1000kbps (1 Mbps)
+                'mp3': 320000,
+                'aac': 256000,
+                'ogg': 320000,
+                'opus': 192000,
+                'flac': 1000000,
+                'wav': 1411000,
+                'm4a': 256000,
+                'aif': 1411000,
+                'aiff': 1411000,
+                'alac': 1000000,
+                'dsd': 2822400,
+                'dsf': 2822400,
+                'dff': 2822400,
+                'ape': 1000000
             };
             
             const defaultBitrate = defaultBitrates[ext] || 128000;
@@ -1270,7 +1322,6 @@ const MMP = {
                     }
                 }
                 
-                // 更新比特率显示
                 if (bitrateDisplay && this.cfg.show_bitrate && this.currentBitrate > 0) {
                     bitrateDisplay.textContent = this.formatBitrateWithUnits(this.currentBitrate);
                 }
@@ -1497,7 +1548,6 @@ const MMP = {
         this.loadedFromCache = false;
         this.currentPlayingUri = '';
         this.currentPlayingName = '';
-        // 注意：不重置currentBitrate，因为它是缓存的
     }
 }
 
