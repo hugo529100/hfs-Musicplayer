@@ -1,5 +1,5 @@
 exports.description = "A clean and pure music player that plays directly when clicking file icons."
-exports.version = 5.6
+exports.version = 5.5
 exports.apiRequired = 9.5
 exports.repo = "Hug3O/Musicplayer+"
 exports.frontend_css = "style.css"
@@ -36,7 +36,7 @@ exports.config = {
     button_height: {
         frontend: true,
         label: "Button height",
-        helperText: "Height of control buttons (e.g. 4vw)",
+        helperText: "Height of control buttons (e.g. 4vw or 8vh)",
         type: 'string',
         defaultValue: '4vw',
         placeholder: "default: 4vw"

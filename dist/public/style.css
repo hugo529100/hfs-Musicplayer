@@ -140,7 +140,6 @@ body:has(#paging) .mmp {
     display: flex;
     align-items: center;
     justify-content: center;
-    /*background: var(--bg);*/
     border: 1px solid var(--text);
     border-radius: 0.3em;
     color: var(--text);
@@ -160,7 +159,7 @@ body:has(#paging) .mmp {
 }
 
 .mmp-progress-container.transcoding {
-    background-color: rgba(0,0,0,0.05);
+    background-color: var(--faint-contrast);
 }
 
 .mmp-progress-container.transcoding::after {
@@ -197,7 +196,7 @@ body:has(#paging) .mmp {
     appearance: none;
     width: 0.3em;
     height: 1.9em;
-    background: var(--thumb-color);
+    background: var(--faint-contrast);
     cursor: pointer;
     border-radius: 0;
     border: none;
@@ -206,7 +205,7 @@ body:has(#paging) .mmp {
 .mmp-progress-bar::-moz-range-thumb {
     width: 0.3em;
     height: 1.9em;
-    background: var(--thumb-color);
+    background: var(--faint-contrast);
     cursor: pointer;
     border-radius: 0;
     border: none;
@@ -286,7 +285,7 @@ body:has(#paging) .mmp {
 }
 
 .mmp-play-pause.playing {
-    color: var(--bg);
+color: var(--bg);
 background-color: var(--text);
 }
 
@@ -297,8 +296,8 @@ background-color: var(--text);
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: var(--text);
     z-index: -1;
+    background-color: var(--good-contrast);
 }
 
 .mmp-custom-button {
@@ -325,7 +324,6 @@ button.mmp-play {
     cursor: pointer;
     padding: 0 0.5em;
     font-size: 0.9em;
-    color: inherit;
 }
 
 .mmp button {
@@ -335,7 +333,7 @@ button.mmp-play {
 
 .mmp button:hover {
     background-color: var(--button-bg);
-    color: var(--text); 
+    color: var(--button-text); 
     outline: none;
 }
 
@@ -439,31 +437,7 @@ min-height: 1.6em;
     }
 }
 
-    @media (forced-colors: active) {
-
-        .mmp-progress-bar::-webkit-slider-thumb {
-            background: Highlight !important;
-            border: 1px solid ButtonText !important;
-        }
-        .mmp-progress-bar::-moz-range-thumb {
-            background: Highlight !important;
-            border: 1px solid ButtonText !important;
-        }
-        .mmp-progress-bar::-ms-thumb {
-            background: Highlight !important;
-            border: 1px solid ButtonText !important;
-        }
+    .mmp-play-pause.playing:hover {
+        background-color: var(--text);
+        color: var(--bg);
     }
-
-/* 觸摸設備的特殊處理 */
-@media (hover: none) and (pointer: coarse) {
-    .mmp-playback-buttons button:active {
-        background-color: var(--faint-contrast);
-        transition: background-color 0.1s ease;
-    }
-    
-    .mmp-playback-buttons button:not(:active) {
-        background-color: var(--button-bg);
-    }
-}
-
