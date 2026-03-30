@@ -3,6 +3,8 @@ const cfg = HFS.getPluginConfig()
 
 // 前端播放器接管开关的存储键名
 const PLAYER_OVERRIDE_STORAGE_KEY = 'mmp_player_override_enabled'
+// 随机播放状态存储键名
+const SHUFFLE_STORAGE_KEY = 'mmp_shuffle_enabled'
 
 // 检查 localStorage 是否支持
 const isLocalStorageSupported = () => {
@@ -26,6 +28,20 @@ const getPlayerOverrideState = () => {
 const setPlayerOverrideState = (value) => {
   if (isLocalStorageSupported()) {
     localStorage.setItem(PLAYER_OVERRIDE_STORAGE_KEY, value ? 'true' : 'false');
+  }
+};
+
+// 获取随机播放状态
+const getShuffleState = () => {
+  if (!isLocalStorageSupported()) return true;
+  const val = localStorage.getItem(SHUFFLE_STORAGE_KEY);
+  return val === null ? true : val === 'true';
+};
+
+// 保存随机播放状态
+const setShuffleState = (value) => {
+  if (isLocalStorageSupported()) {
+    localStorage.setItem(SHUFFLE_STORAGE_KEY, value ? 'true' : 'false');
   }
 };
 
@@ -141,6 +157,9 @@ const MMP = {
     isDbInitialized: false,
     currentBitrate: 0,
     bitrateCache: new Map(),
+    shuffleEnabled: getShuffleState(), // 随机播放状态
+    originalPlaylistOrder: [], // 保存原始播放列表顺序
+    shuffledPlaylist: [], // 随机后的播放列表
 
     async init() {
         // 设置 Options 对话框观察器
@@ -208,6 +227,64 @@ const MMP = {
                 this.handleRemoteStop()
             })
         }
+    },
+
+    // 切换随机播放模式
+    toggleShuffle() {
+        this.shuffleEnabled = !this.shuffleEnabled;
+        setShuffleState(this.shuffleEnabled);
+        
+        const shuffleBtn = document.querySelector('.mmp-shuffle-btn');
+        if (shuffleBtn) {
+            shuffleBtn.textContent = this.shuffleEnabled ? '⋈' : '∞';
+        }
+        
+        // 更新播放列表顺序
+        if (this.playlist.length > 0) {
+            if (this.shuffleEnabled) {
+                // 保存当前播放列表到原始顺序（如果还没保存）
+                if (this.originalPlaylistOrder.length === 0) {
+                    this.originalPlaylistOrder = [...this.playlist];
+                }
+                // 创建随机顺序，但保持当前播放的歌曲在当前位置
+                const currentSong = this.playlist[this.index];
+                const otherSongs = this.playlist.filter((_, i) => i !== this.index);
+                // Fisher-Yates 随机算法
+                for (let i = otherSongs.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [otherSongs[i], otherSongs[j]] = [otherSongs[j], otherSongs[i]];
+                }
+                this.shuffledPlaylist = [currentSong, ...otherSongs];
+                this.playlist = this.shuffledPlaylist;
+                this.index = 0;
+            } else {
+                // 恢复到原始顺序
+                if (this.originalPlaylistOrder.length > 0) {
+                    // 找到当前播放歌曲在原始顺序中的位置
+                    const currentSongUri = this.playlist[this.index].uri;
+                    const newIndex = this.originalPlaylistOrder.findIndex(song => song.uri === currentSongUri);
+                    this.playlist = [...this.originalPlaylistOrder];
+                    this.index = newIndex >= 0 ? newIndex : 0;
+                }
+            }
+        }
+        
+        console.log(`Shuffle ${this.shuffleEnabled ? 'enabled' : 'disabled'}`);
+    },
+
+    // 获取随机播放的下一个索引
+    getNextShuffleIndex() {
+        if (!this.shuffleEnabled || this.playlist.length <= 1) {
+            return (this.index + 1) % this.playlist.length;
+        }
+        
+        // 随机模式：随机选择下一首，但不与当前相同
+        let nextIndex;
+        do {
+            nextIndex = Math.floor(Math.random() * this.playlist.length);
+        } while (nextIndex === this.index && this.playlist.length > 1);
+        
+        return nextIndex;
     },
 
     handleFileClick(e) {
@@ -412,6 +489,8 @@ const MMP = {
                 folderCache: Array.from(this.folderCache.entries()),
                 currentFolder: this.currentFolder,
                 playlist: this.playlist,
+                originalPlaylistOrder: this.originalPlaylistOrder,
+                shuffledPlaylist: this.shuffledPlaylist,
                 timestamp: Date.now()
             }
             localStorage.setItem(this.storageKey, JSON.stringify(dataToSave))
@@ -431,6 +510,8 @@ const MMP = {
                     this.folderCache = new Map(data.folderCache || [])
                     this.currentFolder = data.currentFolder || ''
                     this.playlist = data.playlist || []
+                    this.originalPlaylistOrder = data.originalPlaylistOrder || []
+                    this.shuffledPlaylist = data.shuffledPlaylist || []
                 }
             }
         } catch (e) {
@@ -589,6 +670,7 @@ const MMP = {
                     <div class='mmp-title'></div>
                 </div>
                 <div class='mmp-header-controls'>
+                    <button type="button" class='mmp-shuffle-btn' title="Shuffle">${this.shuffleEnabled ? '⋈' : '∞'}</button>
                     <div class='mmp-volume-control'>
                         <button type="button" class='mmp-vol-down' title="Decrease volume">−</button>
                         <span class='mmp-volume-value'>${Math.round(this.cfg.audio_vol * 100)}%</span>
@@ -612,6 +694,12 @@ const MMP = {
         document.body.insertAdjacentHTML('beforeend', playerHTML)
 
         this.audioElement = document.querySelector('#mmp-audio audio')
+        
+        // 随机播放按钮事件
+        const shuffleBtn = document.querySelector('.mmp-shuffle-btn')
+        if (shuffleBtn) {
+            shuffleBtn.addEventListener('click', () => this.toggleShuffle())
+        }
 
         document.querySelector('.mmp-prev')?.addEventListener('click', () => {
             setTimeout(() => this.playPrev(), 300)
@@ -782,13 +870,33 @@ const MMP = {
         }
 
         const playlist = await this.getPlaylist(folderUri)
-        this.playlist = playlist
-        this.currentFolder = folderUri
         
-        const idx = this.playlist.findIndex(f =>
-            f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
-        )
-        this.index = idx >= 0 ? idx : 0
+        // 保存原始播放列表顺序
+        this.originalPlaylistOrder = [...playlist];
+        
+        if (this.shuffleEnabled) {
+            // 随机模式：打乱顺序，但保持当前选中的歌曲在第一位
+            const currentSong = playlist.find(f => 
+                f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
+            );
+            const otherSongs = playlist.filter(f => f !== currentSong);
+            // Fisher-Yates 随机算法
+            for (let i = otherSongs.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [otherSongs[i], otherSongs[j]] = [otherSongs[j], otherSongs[i]];
+            }
+            this.playlist = currentSong ? [currentSong, ...otherSongs] : [...otherSongs];
+            this.index = 0;
+            this.shuffledPlaylist = [...this.playlist];
+        } else {
+            this.playlist = playlist;
+            const idx = this.playlist.findIndex(f =>
+                f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
+            )
+            this.index = idx >= 0 ? idx : 0
+        }
+        
+        this.currentFolder = folderUri
         
         this.play(this.playlist[this.index])
     },
@@ -1470,7 +1578,12 @@ const MMP = {
             return;
         }
         
-        this.index = (this.index + 1) % this.playlist.length;
+        if (this.shuffleEnabled) {
+            this.index = this.getNextShuffleIndex();
+        } else {
+            this.index = (this.index + 1) % this.playlist.length;
+        }
+        
         this.play(this.playlist[this.index]);
     },
 
@@ -1482,7 +1595,17 @@ const MMP = {
             return;
         }
         
-        this.index = (this.index - 1 + this.playlist.length) % this.playlist.length;
+        if (this.shuffleEnabled) {
+            // 上一首在随机模式下也使用随机算法，但避免与当前相同
+            let prevIndex;
+            do {
+                prevIndex = Math.floor(Math.random() * this.playlist.length);
+            } while (prevIndex === this.index && this.playlist.length > 1);
+            this.index = prevIndex;
+        } else {
+            this.index = (this.index - 1 + this.playlist.length) % this.playlist.length;
+        }
+        
         this.play(this.playlist[this.index]);
     },
 

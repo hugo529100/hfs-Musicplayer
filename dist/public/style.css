@@ -107,6 +107,22 @@ body:has(#paging) .mmp {
     gap: 0.8em;
 }
 
+/* 随机播放按钮样式 - 跟随音量按钮风格 */
+.mmp-shuffle-btn {
+    width: 2.0em;
+    height: 1.5em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1em;
+    padding: 0;
+}
+
+.mmp-shuffle-btn:hover {
+    opacity: 0.8;
+}
+
 .mmp-volume-control {
     display: flex;
     align-items: center;
@@ -361,7 +377,9 @@ button.mmp-play {
     .mmp-title {
         text-align: left;
     }
-    .mmp-volume-control {
+    /* 竖屏时隐藏音量控制区域（包含音量按钮和随机播放按钮） */
+    .mmp-volume-control,
+    .mmp-shuffle-btn {
         display: none;
     }
 }
