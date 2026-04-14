@@ -87,7 +87,7 @@ body:has(#paging) .mmp {
     align-items: center;
     overflow: hidden;
     margin: 0;
-    line-height: 1.2;
+    /*line-height: 1.2;*/
     justify-content: center;
 }
 
@@ -98,13 +98,14 @@ body:has(#paging) .mmp {
     font-size: 0.9em;
     padding: 0;
     line-height: inherit;
-    max-width: 90%;
+    /*width: 80%;*/
+    text-align: center;
 }
 
 .mmp-header-controls {
     display: flex;
     align-items: center;
-    gap: 0.8em;
+    gap: 3px;
 }
 
 /* 随机播放按钮样式 - 跟随音量按钮风格 */
@@ -425,7 +426,7 @@ button.mmp-play {
         display: none; 
     }
     .mmp-title {
-        text-align: left;
+        text-align: center;
     }
     /* 竖屏时隐藏音量控制区域和文件菜单按钮 */
     .mmp-volume-control,
@@ -454,7 +455,10 @@ button.mmp-play {
         min-height: 1.6em;
     }
     .mmp-title-container {
-        max-width: 60%;
+        max-width: 55%;
+    }
+    .mmp-title {
+        max-width: 80%;
     }
     .mmp-header-controls {
         position: absolute;
