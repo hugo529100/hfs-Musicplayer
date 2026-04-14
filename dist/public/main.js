@@ -81,13 +81,15 @@ function insertPlayerOverrideToggle() {
   checkbox.checked = playerOverrideEnabled;
 
   // 添加事件监听
-  checkbox.addEventListener('change', (e) => {
+checkbox.addEventListener('change', (e) => {
     playerOverrideEnabled = e.target.checked;
     setPlayerOverrideState(playerOverrideEnabled);
     
-    // 可以在这里添加提示信息
     console.log(`Player override ${playerOverrideEnabled ? 'enabled' : 'disabled'}`);
-  });
+    
+    // 刷新文件列表
+    HFS.reloadList?.();
+});
 }
 
 // 监听 Options 对话框的出现
@@ -117,11 +119,17 @@ if (cfg.use_file_list) {
     HFS.onEvent('afterEntryName', ({ entry }, { setOrder }) => {
         setOrder(-1)
         if (MMP.audio_formats.test(entry.uri)) {
-            return h('button', {
-                className: 'mmp-play',
-                onClick: () => MMP.audio(entry),
-                title: "Play"
-            }, '➤')
+            // 只在播放器接管启用时显示播放按钮
+            if (playerOverrideEnabled) {
+                return h('button', {
+                    className: 'mmp-play',
+                    onClick: () => MMP.audio(entry),
+                    title: "Play"
+                }, '➤')
+            } else {
+                // 返回空字符串或 null，不显示任何内容
+                return null
+            }
         }
     })
 }
@@ -157,15 +165,13 @@ const MMP = {
     isDbInitialized: false,
     currentBitrate: 0,
     bitrateCache: new Map(),
-    shuffleEnabled: getShuffleState(), // 随机播放状态
-    originalPlaylistOrder: [], // 保存原始播放列表顺序
-    shuffledPlaylist: [], // 随机后的播放列表
+    shuffleEnabled: getShuffleState(),
+    originalPlaylistOrder: [],
+    shuffledPlaylist: [],
 
     async init() {
-        // 设置 Options 对话框观察器
         setupOptionsObserver();
         
-        // 只在播放器接管启用时注册点击事件
         if (cfg.auto_play && playerOverrideEnabled) {
             document.addEventListener('click', this.handleFileClick.bind(this), true)
         }
@@ -186,7 +192,6 @@ const MMP = {
         this.initPlayerElement()
         this.setupAudioBindings()
         
-        // 只在播放器接管启用时设置点击图标
         if (cfg.auto_play && playerOverrideEnabled) {
             this.setupClickIcons()
         }
@@ -196,15 +201,12 @@ const MMP = {
                 this.cfg = { ...this.cfg, ...newCfg }
                 document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
                 
-                // 当配置变化时，重新检查 auto_play 状态和播放器接管状态
                 if (this.cfg.auto_play) {
-                    // 如果 auto_play 启用，需要检查是否显示开关
                     setTimeout(insertPlayerOverrideToggle, 100);
                 }
             })
             
             HFS.onEvent('afterList', () => {
-                // 只在播放器接管启用时设置点击图标
                 if (cfg.auto_play && playerOverrideEnabled) {
                     this.setupClickIcons()
                 }
@@ -229,27 +231,317 @@ const MMP = {
         }
     },
 
-    // 切换随机播放模式
+    // 显示当前播放文件的 fileMenu
+    async showFileMenuForCurrentSong() {
+        if (!this.currentPlayingUri) {
+            console.log('No song currently playing');
+            return;
+        }
+        
+        try {
+            // 获取当前播放文件的 entry 信息
+            const fileName = this.currentPlayingName + (this.currentPlayingUri.match(/\.[^.]+$/)?.[0] || '');
+            const folderUri = this.currentPlayingUri.replace(/\/[^/]+$/, '') + '/';
+            
+            // 构建 entry 对象
+            const entry = {
+                name: fileName,
+                uri: this.currentPlayingUri,
+                isFolder: false,
+                ext: fileName.split('.').pop().toLowerCase()
+            };
+            
+            // 获取文件列表以获取完整信息
+            const response = await fetch(`/~/api/get_file_list?uri=${encodeURIComponent(folderUri)}`);
+            const data = await response.json();
+            const fileInfo = data.list?.find(f => f.n === fileName);
+            
+            if (fileInfo) {
+                entry.size = fileInfo.s;
+                entry.modified = fileInfo.m;
+            }
+            
+            // 触发 fileMenu 事件
+            if (HFS.onEvent && HFS.emitEvent) {
+                // 创建菜单容器
+                const menuContainer = this.createFileMenuContainer(entry);
+                if (menuContainer) {
+                    document.body.appendChild(menuContainer);
+                }
+            } else {
+                // 降级方案：显示简单的菜单
+                this.showSimpleFileMenu(entry);
+            }
+        } catch (error) {
+            console.error('Failed to show file menu:', error);
+            this.showSimpleFileMenu({ uri: this.currentPlayingUri, name: this.currentPlayingName });
+        }
+    },
+    
+    // 创建 fileMenu 容器
+    createFileMenuContainer(entry) {
+        try {
+            // 收集所有菜单项
+            const menuItems = [];
+            
+            // 添加默认菜单项
+            menuItems.push({
+                id: 'download',
+                label: 'Download',
+                icon: 'download',
+                onClick: () => this.downloadCurrentFile()
+            });
+            
+            menuItems.push({
+                id: 'info',
+                label: 'File Info',
+                icon: 'info',
+                onClick: () => this.showFileInfo(entry)
+            });
+            
+            // 如果有自定义的 fileMenu 事件监听器，这里可以触发它们
+            // 由于无法直接调用其他插件的监听器，我们提供一个扩展点
+            
+            // 创建菜单 DOM
+            const menu = document.createElement('div');
+            menu.className = 'mmp-filemenu-popup';
+            menu.style.cssText = `
+                position: fixed;
+                background: var(--bg);
+                border: 1px solid var(--text);
+                border-radius: 0.4em;
+                padding: 0.3em 0;
+                min-width: 150px;
+                z-index: 10000;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            `;
+            
+            menuItems.forEach(item => {
+                const menuItem = document.createElement('div');
+                menuItem.className = 'mmp-filemenu-item';
+                menuItem.style.cssText = `
+                    padding: 0.5em 1em;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5em;
+                    transition: background 0.2s;
+                `;
+                menuItem.innerHTML = `
+                    <span style="font-size: 1em;">${item.icon === 'download' ? '⬇️' : item.icon === 'info' ? 'ℹ️' : '📄'}</span>
+                    <span>${item.label}</span>
+                `;
+                menuItem.onmouseover = () => menuItem.style.background = 'var(--faint-contrast)';
+                menuItem.onmouseout = () => menuItem.style.background = '';
+                menuItem.onclick = () => {
+                    item.onClick();
+                    menu.remove();
+                };
+                menu.appendChild(menuItem);
+            });
+            
+            // 点击其他地方关闭菜单
+            const closeMenu = (e) => {
+                if (!menu.contains(e.target)) {
+                    menu.remove();
+                    document.removeEventListener('click', closeMenu);
+                    document.removeEventListener('contextmenu', closeMenu);
+                }
+            };
+            setTimeout(() => {
+                document.addEventListener('click', closeMenu);
+                document.addEventListener('contextmenu', closeMenu);
+            }, 0);
+            
+            // 定位菜单
+            const fileMenuBtn = document.querySelector('.mmp-filemenu-btn');
+            if (fileMenuBtn) {
+                const rect = fileMenuBtn.getBoundingClientRect();
+                menu.style.bottom = (window.innerHeight - rect.top + 5) + 'px';
+                menu.style.right = (window.innerWidth - rect.right) + 'px';
+            } else {
+                menu.style.bottom = '50px';
+                menu.style.right = '10px';
+            }
+            
+            return menu;
+        } catch (e) {
+            console.error('Error creating file menu:', e);
+            return null;
+        }
+    },
+    
+    // 简单的文件菜单降级方案
+    showSimpleFileMenu(entry) {
+        const menu = document.createElement('div');
+        menu.className = 'mmp-filemenu-popup';
+        menu.style.cssText = `
+            position: fixed;
+            background: var(--bg);
+            border: 1px solid var(--text);
+            border-radius: 0.4em;
+            padding: 0.3em 0;
+            min-width: 150px;
+            z-index: 10000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        `;
+        
+        const items = [
+            { label: 'Download', action: () => this.downloadCurrentFile() },
+            { label: 'File Info', action: () => this.showFileInfo(entry) }
+        ];
+        
+        items.forEach(item => {
+            const menuItem = document.createElement('div');
+            menuItem.textContent = item.label;
+            menuItem.style.cssText = `
+                padding: 0.5em 1em;
+                cursor: pointer;
+                transition: background 0.2s;
+            `;
+            menuItem.onmouseover = () => menuItem.style.background = 'var(--faint-contrast)';
+            menuItem.onmouseout = () => menuItem.style.background = '';
+            menuItem.onclick = () => {
+                item.action();
+                menu.remove();
+            };
+            menu.appendChild(menuItem);
+        });
+        
+        const closeMenu = (e) => {
+            if (!menu.contains(e.target)) {
+                menu.remove();
+                document.removeEventListener('click', closeMenu);
+            }
+        };
+        setTimeout(() => document.addEventListener('click', closeMenu), 0);
+        
+        const fileMenuBtn = document.querySelector('.mmp-filemenu-btn');
+        if (fileMenuBtn) {
+            const rect = fileMenuBtn.getBoundingClientRect();
+            menu.style.bottom = (window.innerHeight - rect.top + 5) + 'px';
+            menu.style.right = (window.innerWidth - rect.right) + 'px';
+        } else {
+            menu.style.bottom = '50px';
+            menu.style.right = '10px';
+        }
+        
+        document.body.appendChild(menu);
+    },
+    
+    // 下载当前播放的文件
+    downloadCurrentFile() {
+        if (this.currentPlayingUri) {
+            const link = document.createElement('a');
+            link.href = this.currentPlayingUri;
+            link.download = this.currentPlayingName + (this.currentPlayingUri.match(/\.[^.]+$/)?.[0] || '');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    },
+    
+    // 显示文件信息
+    showFileInfo(entry) {
+        const infoDialog = document.createElement('div');
+        infoDialog.className = 'mmp-fileinfo-dialog';
+        infoDialog.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--bg);
+            border: 2px solid var(--text);
+            border-radius: 0.5em;
+            padding: 1.5em;
+            z-index: 10001;
+            min-width: 250px;
+            max-width: 400px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        `;
+        
+        infoDialog.innerHTML = `
+            <h3 style="margin: 0 0 1em 0; border-bottom: 1px solid var(--text); padding-bottom: 0.5em;">File Information</h3>
+            <div style="margin-bottom: 0.5em;"><strong>Name:</strong> ${this.currentPlayingName}</div>
+            <div style="margin-bottom: 0.5em;"><strong>URI:</strong> <span style="word-break: break-all;">${this.currentPlayingUri}</span></div>
+            ${entry.size ? `<div style="margin-bottom: 0.5em;"><strong>Size:</strong> ${this.formatFileSize(entry.size)}</div>` : ''}
+            ${entry.modified ? `<div style="margin-bottom: 0.5em;"><strong>Modified:</strong> ${new Date(entry.modified).toLocaleString()}</div>` : ''}
+            <div style="margin-bottom: 0.5em;"><strong>Format:</strong> ${this.currentPlayingUri.match(/\.[^.]+$/)?.[0]?.toUpperCase() || 'Unknown'}</div>
+            ${this.currentBitrate ? `<div style="margin-bottom: 0.5em;"><strong>Bitrate:</strong> ${this.formatBitrateWithUnits(this.currentBitrate)}</div>` : ''}
+            <div style="margin-top: 1.5em; text-align: right;">
+                <button style="padding: 0.3em 1em; cursor: pointer;">Close</button>
+            </div>
+        `;
+        
+        const closeBtn = infoDialog.querySelector('button');
+        closeBtn.onclick = () => infoDialog.remove();
+        
+        // 点击背景关闭
+        infoDialog.addEventListener('click', (e) => {
+            if (e.target === infoDialog) infoDialog.remove();
+        });
+        
+        document.body.appendChild(infoDialog);
+    },
+    
+    // 格式化文件大小
+    formatFileSize(bytes) {
+        if (!bytes) return 'Unknown';
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let size = bytes;
+        let unitIndex = 0;
+        while (size >= 1024 && unitIndex < units.length - 1) {
+            size /= 1024;
+            unitIndex++;
+        }
+        return `${size.toFixed(1)} ${units[unitIndex]}`;
+    },
+
+    // 添加文件菜单按钮
+    addFileMenuButton() {
+        const headerControls = document.querySelector('.mmp-header-controls');
+        if (!headerControls) return;
+        
+        if (document.querySelector('.mmp-filemenu-btn')) return;
+        
+        const fileMenuBtn = document.createElement('button');
+        fileMenuBtn.type = 'button';
+        fileMenuBtn.className = 'mmp-filemenu-btn';
+        fileMenuBtn.title = 'File Menu';
+        fileMenuBtn.textContent = '☰';
+        
+        fileMenuBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.showFileMenuForCurrentSong();
+        });
+        
+        // 插入到音量控件和关闭按钮之间
+        const volumeControl = headerControls.querySelector('.mmp-volume-control');
+        const closeBtn = headerControls.querySelector('.mmp-close');
+        
+        if (volumeControl && closeBtn) {
+            headerControls.insertBefore(fileMenuBtn, closeBtn);
+        } else {
+            headerControls.appendChild(fileMenuBtn);
+        }
+    },
+
     toggleShuffle() {
         this.shuffleEnabled = !this.shuffleEnabled;
         setShuffleState(this.shuffleEnabled);
         
         const shuffleBtn = document.querySelector('.mmp-shuffle-btn');
         if (shuffleBtn) {
-            shuffleBtn.textContent = this.shuffleEnabled ? '⋈' : '∞';
+            shuffleBtn.textContent = this.shuffleEnabled ? '⋈' : '⇌';
         }
         
-        // 更新播放列表顺序
         if (this.playlist.length > 0) {
             if (this.shuffleEnabled) {
-                // 保存当前播放列表到原始顺序（如果还没保存）
                 if (this.originalPlaylistOrder.length === 0) {
                     this.originalPlaylistOrder = [...this.playlist];
                 }
-                // 创建随机顺序，但保持当前播放的歌曲在当前位置
                 const currentSong = this.playlist[this.index];
                 const otherSongs = this.playlist.filter((_, i) => i !== this.index);
-                // Fisher-Yates 随机算法
                 for (let i = otherSongs.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [otherSongs[i], otherSongs[j]] = [otherSongs[j], otherSongs[i]];
@@ -258,9 +550,7 @@ const MMP = {
                 this.playlist = this.shuffledPlaylist;
                 this.index = 0;
             } else {
-                // 恢复到原始顺序
                 if (this.originalPlaylistOrder.length > 0) {
-                    // 找到当前播放歌曲在原始顺序中的位置
                     const currentSongUri = this.playlist[this.index].uri;
                     const newIndex = this.originalPlaylistOrder.findIndex(song => song.uri === currentSongUri);
                     this.playlist = [...this.originalPlaylistOrder];
@@ -272,13 +562,11 @@ const MMP = {
         console.log(`Shuffle ${this.shuffleEnabled ? 'enabled' : 'disabled'}`);
     },
 
-    // 获取随机播放的下一个索引
     getNextShuffleIndex() {
         if (!this.shuffleEnabled || this.playlist.length <= 1) {
             return (this.index + 1) % this.playlist.length;
         }
         
-        // 随机模式：随机选择下一首，但不与当前相同
         let nextIndex;
         do {
             nextIndex = Math.floor(Math.random() * this.playlist.length);
@@ -288,10 +576,8 @@ const MMP = {
     },
 
     handleFileClick(e) {
-        // 检查播放器接管是否启用
         if (!cfg.auto_play || !playerOverrideEnabled) return;
         
-        // 查找是否点击了文件列表中的元素
         const target = e.target.closest('li.file a[href], li.file span.icon, li.file .mmp-audio-icon, li.file .mmp-play')
         if (!target) return
         
@@ -304,21 +590,17 @@ const MMP = {
         const fileName = nameElement.textContent.trim()
         if (!this.audio_formats.test(fileName)) return
         
-        // 检查是否启用了自动播放
         if (!this.cfg.auto_play) return
         
-        // 阻止默认行为和事件冒泡
         e.preventDefault()
         e.stopImmediatePropagation()
         e.stopPropagation()
         
-        // 获取 entry 信息
         const entry = this.findEntryByName(fileName) || { 
             name: fileName, 
             uri: nameElement.href 
         }
         
-        // 播放音频
         this.audio(entry)
         
         return false
@@ -346,7 +628,6 @@ const MMP = {
                 if (!db.objectStoreNames.contains('audioCache')) {
                     const store = db.createObjectStore('audioCache', { keyPath: 'uri' })
                     store.createIndex('timestamp', 'timestamp', { unique: false })
-                    // 已移除 size 索引
                 }
             }
         })
@@ -363,7 +644,6 @@ const MMP = {
             request.onsuccess = () => {
                 const result = request.result
                 if (result) {
-                    // 缓存永不过期 - 移除了过期时间检查
                     const blob = new Blob([result.data], { type: result.contentType })
                     const blobUrl = URL.createObjectURL(blob)
                     resolve({
@@ -401,7 +681,6 @@ const MMP = {
             const request = store.put(audioData)
             
             request.onsuccess = async () => {
-                // 已移除缓存大小清理
                 resolve(true)
             }
             
@@ -425,18 +704,11 @@ const MMP = {
         })
     },
 
-    // 已移除 cleanupExpiredCache 方法
-
-    // 已移除 cleanupCacheBySize 方法
-
-    // 已移除 getCacheSize 方法
-
     async getCachedAudio(uri) {
         if (!this.cfg.enable_cache) return null
         
         const memoryCached = this.audioCache.get(uri)
         if (memoryCached && memoryCached.blobUrl) {
-            // 内存缓存保持1小时
             if (Date.now() - memoryCached.timestamp < 3600000) {
                 return memoryCached.blobUrl
             } else {
@@ -591,7 +863,6 @@ const MMP = {
     },
 
     setupClickIcons() {
-        // 检查播放器接管是否启用
         if (!cfg.auto_play || !playerOverrideEnabled) return;
         
         const bind = () => {
@@ -607,7 +878,6 @@ const MMP = {
                 icon.style.cursor = 'pointer'
                 icon.title = 'Click to play'
 
-                // 移除旧的点击监听，防止重复
                 icon.removeEventListener('click', this.handleIconClick)
                 icon.addEventListener('click', this.handleIconClick.bind(this), { capture: true })
 
@@ -621,7 +891,6 @@ const MMP = {
     },
 
     handleIconClick(e) {
-        // 检查播放器接管是否启用
         if (!cfg.auto_play || !playerOverrideEnabled) return;
         
         if (!this.cfg.auto_play) return
@@ -649,7 +918,6 @@ const MMP = {
     initPlayerElement() {
         document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
         
-        // 进度条始终显示，不受配置影响
         const progressHTML = `
             <div class='mmp-progress-container'>
                 <input type="range" class='mmp-progress-bar' min="0" max="10000" value="0" step="1">
@@ -670,7 +938,7 @@ const MMP = {
                     <div class='mmp-title'></div>
                 </div>
                 <div class='mmp-header-controls'>
-                    <button type="button" class='mmp-shuffle-btn' title="Shuffle">${this.shuffleEnabled ? '⋈' : '∞'}</button>
+                    <button type="button" class='mmp-shuffle-btn' title="Shuffle">${this.shuffleEnabled ? '⋈' : '⇌'}</button>
                     <div class='mmp-volume-control'>
                         <button type="button" class='mmp-vol-down' title="Decrease volume">−</button>
                         <span class='mmp-volume-value'>${Math.round(this.cfg.audio_vol * 100)}%</span>
@@ -695,7 +963,9 @@ const MMP = {
 
         this.audioElement = document.querySelector('#mmp-audio audio')
         
-        // 随机播放按钮事件
+        // 添加文件菜单按钮
+        this.addFileMenuButton();
+        
         const shuffleBtn = document.querySelector('.mmp-shuffle-btn')
         if (shuffleBtn) {
             shuffleBtn.addEventListener('click', () => this.toggleShuffle())
@@ -721,7 +991,6 @@ const MMP = {
             }
         })
         
-        // 进度条始终初始化
         const progressBar = document.querySelector('.mmp-progress-bar')
         if (progressBar) {
             const audio = this.audioElement
@@ -852,7 +1121,6 @@ const MMP = {
     },
 
     async audio(entry) {
-        // 检查播放器接管是否启用
         if (!cfg.auto_play || !playerOverrideEnabled) return;
 
         if (this.isRemoteControlled) return
@@ -871,16 +1139,13 @@ const MMP = {
 
         const playlist = await this.getPlaylist(folderUri)
         
-        // 保存原始播放列表顺序
         this.originalPlaylistOrder = [...playlist];
         
         if (this.shuffleEnabled) {
-            // 随机模式：打乱顺序，但保持当前选中的歌曲在第一位
             const currentSong = playlist.find(f => 
                 f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
             );
             const otherSongs = playlist.filter(f => f !== currentSong);
-            // Fisher-Yates 随机算法
             for (let i = otherSongs.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [otherSongs[i], otherSongs[j]] = [otherSongs[j], otherSongs[i]];
@@ -1596,7 +1861,6 @@ const MMP = {
         }
         
         if (this.shuffleEnabled) {
-            // 上一首在随机模式下也使用随机算法，但避免与当前相同
             let prevIndex;
             do {
                 prevIndex = Math.floor(Math.random() * this.playlist.length);

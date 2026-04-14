@@ -123,6 +123,56 @@ body:has(#paging) .mmp {
     opacity: 0.8;
 }
 
+/* 文件菜单按钮样式 - 跟随关闭按钮风格 */
+.mmp-filemenu-btn {
+    width: 1.5em;
+    height: 1.5em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--text);
+    border-radius: 0.3em;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 1em;
+    background: transparent;
+}
+
+.mmp-filemenu-btn:hover {
+    background-color: var(--button-bg);
+    color: var(--button-text);
+    outline: none;
+}
+
+/* 文件菜单弹窗样式 */
+.mmp-filemenu-popup {
+    background: var(--bg);
+    border: 1px solid var(--text);
+    border-radius: 0.4em;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    z-index: 10000;
+}
+
+.mmp-filemenu-item {
+    padding: 0.5em 1em;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+}
+
+.mmp-filemenu-item:hover {
+    background: var(--faint-contrast);
+}
+
+/* 文件信息对话框样式 */
+.mmp-fileinfo-dialog {
+    background: var(--bg);
+    border: 2px solid var(--text);
+    border-radius: 0.5em;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    z-index: 10001;
+}
+
 .mmp-volume-control {
     display: flex;
     align-items: center;
@@ -168,7 +218,7 @@ body:has(#paging) .mmp {
     border: 1px solid var(--text);
     border-radius: 0.25em;
     padding: 0.5em;
-    margin-bottom: 0em;/*進度條下邊間距*/
+    margin-bottom: 0em;
     background: 
     radial-gradient(circle at 1px 1px, rgba(150, 150, 150, 0.15) 1px, transparent 1px);
     background-size: 6px 6px;
@@ -207,7 +257,6 @@ body:has(#paging) .mmp {
     cursor: not-allowed;
 }
 
-/*進度跳針寬度*/
 .mmp-progress-bar::-webkit-slider-thumb {
     appearance: none;
     width: 0.3em;
@@ -377,9 +426,10 @@ button.mmp-play {
     .mmp-title {
         text-align: left;
     }
-    /* 竖屏时隐藏音量控制区域（包含音量按钮和随机播放按钮） */
+    /* 竖屏时隐藏音量控制区域和文件菜单按钮 */
     .mmp-volume-control,
-    .mmp-shuffle-btn {
+    .mmp-shuffle-btn,
+    .mmp-filemenu-btn {
         display: none;
     }
 }
@@ -398,7 +448,7 @@ button.mmp-play {
     }
     .mmp-bitrate {
         position: absolute;
-        left: 8.5em; /* 在时间显示右侧 */
+        left: 8.5em;
         margin-right: 0;
         min-height: 1.6em;
     }
@@ -413,7 +463,7 @@ button.mmp-play {
 
 @media (max-width: 600px) {
     .mmp-bitrate {
-        display: none; /* 小屏幕时隐藏比特率显示 */
+        display: none;
     }
 }
 
@@ -429,7 +479,7 @@ button.mmp-play {
     .mmp-time {
         font-size: 0.7em;
         min-width: 4em;
-min-height: 1.6em;
+        min-height: 1.6em;
     }
     
     .mmp-title {
@@ -455,7 +505,7 @@ min-height: 1.6em;
     }
 }
 
-    .mmp-play-pause.playing:hover {
-        background-color: var(--text);
-        color: var(--bg);
-    }
+.mmp-play-pause.playing:hover {
+    background-color: var(--text);
+    color: var(--bg);
+}
