@@ -1,5 +1,5 @@
 exports.description = "A clean and pure music player that plays directly when clicking file icons."
-exports.version = 5.8
+exports.version = 5.9
 exports.apiRequired = 9.5
 exports.repo = "Hug3O/Musicplayer+"
 exports.frontend_css = "style.css"
@@ -41,12 +41,6 @@ exports.config = {
         defaultValue: '4vw',
         placeholder: "default: 4vw"
     },
-    show_progress: {
-        frontend: false, // 改为 false，不在后台显示
-        label: "Show progress bar",
-        type: 'boolean',
-        defaultValue: true
-    },
     show_bitrate: {
         frontend: true,
         label: "Show bitrate information",
@@ -65,17 +59,10 @@ exports.config = {
         type: 'boolean',
         defaultValue: true
     },
-    lossless_formats: {
+    enable_lossless_and_cache: {
         frontend: true,
-        label: "Enable lossless audio formats support",
-        helperText: "Play the decoded WAV version located in the cache folder under the same directory as the music file.",
-        type: 'boolean',
-        defaultValue: true
-    },
-    cache_check: {
-        frontend: true,
-        label: "Check for cached transcoded versions",
-        helperText: "Play the decoded WAV version located in the cache folder under the same directory as the music file.",
+        label: "Enable lossless audio support & cache check",
+        helperText: "Play decoded WAV/FLAC versions from cache folder and enable transcoded version checking",
         type: 'boolean',
         defaultValue: true
     },
@@ -86,5 +73,4 @@ exports.config = {
         type: 'boolean',
         defaultValue: true
     }
-    // 已移除 max_cache_size 和 cache_expiry_hours 配置项
 }

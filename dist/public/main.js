@@ -114,29 +114,25 @@ if (cfg.use_file_menu) {
     )
 }
 
-// 原有的 fileList 事件处理 - 添加状态检查
+// 原有的 fileList 事件处理 - 不应该受 playerOverrideEnabled 影响
 if (cfg.use_file_list) {
     HFS.onEvent('afterEntryName', ({ entry }, { setOrder }) => {
         setOrder(-1)
         if (MMP.audio_formats.test(entry.uri)) {
-            // 只在播放器接管启用时显示播放按钮
-            if (playerOverrideEnabled) {
-                return h('button', {
-                    className: 'mmp-play',
-                    onClick: () => MMP.audio(entry),
-                    title: "Play"
-                }, '➤')
-            } else {
-                // 返回空字符串或 null，不显示任何内容
-                return null
-            }
+            // 移除 playerOverrideEnabled 检查，始终显示播放按钮
+            return h('button', {
+                className: 'mmp-play',
+                onClick: () => MMP.audio(entry),
+                title: "Play"
+            }, '➤')
         }
     })
 }
 
+
 const MMP = {
     cfg,
-    audio_formats: cfg.lossless_formats 
+    audio_formats: cfg.enable_lossless_and_cache 
         ? /\.(aac|flac|mka|mp3|ogg|opus|wav|wma|m4a|aif|aiff|alac|dsd|dsf|dff|ape)$/i
         : /\.(aac|flac|mka|mp3|ogg|opus|wav|m4a)$/i,
     needTranscodeFormats: /\.(dsd|dsf|dff|aif|aiff|ape|alac)$/i,
@@ -169,51 +165,54 @@ const MMP = {
     originalPlaylistOrder: [],
     shuffledPlaylist: [],
 
-    async init() {
-        setupOptionsObserver();
-        
-        if (cfg.auto_play && playerOverrideEnabled) {
-            document.addEventListener('click', this.handleFileClick.bind(this), true)
-        }
-        
-        const savedVol = localStorage.getItem('mmp_volume')
-        if (savedVol) {
-            this.cfg.audio_vol = parseFloat(savedVol)
-        }
-        
-        if (this.cfg.enable_cache) {
-            this.restoreCachedPlaylists()
-        }
-        
-        if (this.cfg.enable_cache) {
-            await this.initIndexedDB()
-        }
-        
-        this.initPlayerElement()
-        this.setupAudioBindings()
-        
-        if (cfg.auto_play && playerOverrideEnabled) {
-            this.setupClickIcons()
-        }
-        
-        if (window.HFS && HFS.onEvent) {
-            HFS.onEvent('configChanged', (newCfg) => {
-                this.cfg = { ...this.cfg, ...newCfg }
-                document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
-                
-                if (this.cfg.auto_play) {
-                    setTimeout(insertPlayerOverrideToggle, 100);
-                }
-            })
+async init() {
+    setupOptionsObserver();
+    
+    // 只让图标点击受 playerOverrideEnabled 控制
+    if (cfg.auto_play) {
+        document.addEventListener('click', this.handleFileClick.bind(this), true)
+    }
+    
+    const savedVol = localStorage.getItem('mmp_volume')
+    if (savedVol) {
+        this.cfg.audio_vol = parseFloat(savedVol)
+    }
+    
+    if (this.cfg.enable_cache) {
+        this.restoreCachedPlaylists()
+    }
+    
+    if (this.cfg.enable_cache) {
+        await this.initIndexedDB()
+    }
+    
+    this.initPlayerElement()
+    this.setupAudioBindings()
+    
+    // 只让图标点击受 playerOverrideEnabled 控制
+    if (cfg.auto_play) {
+        this.setupClickIcons()
+    }
+    
+    if (window.HFS && HFS.onEvent) {
+        HFS.onEvent('configChanged', (newCfg) => {
+            this.cfg = { ...this.cfg, ...newCfg }
+            document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
             
-            HFS.onEvent('afterList', () => {
-                if (cfg.auto_play && playerOverrideEnabled) {
-                    this.setupClickIcons()
-                }
-                if (this.isPlaying) {
-                    document.getElementById('mmp-audio').style.display = 'flex'
-                }
-            })
+            if (this.cfg.auto_play) {
+                setTimeout(insertPlayerOverrideToggle, 100);
+            }
+        })
+        
+        HFS.onEvent('afterList', () => {
+            // 移除了 playerOverrideEnabled 检查
+            if (cfg.auto_play) {
+                this.setupClickIcons()
+            }
+            if (this.isPlaying) {
+                document.getElementById('mmp-audio').style.display = 'flex'
+            }
+        })
 
             if (this.cfg.enable_cache) {
                 window.addEventListener('beforeunload', () => {
@@ -862,33 +861,34 @@ const MMP = {
         }
     },
 
-    setupClickIcons() {
-        if (!cfg.auto_play || !playerOverrideEnabled) return;
-        
-        const bind = () => {
-            document.querySelectorAll('li.file:not([data-mmp-bound])').forEach(li => {
-                const a = li.querySelector('a[href]')
-                const name = a?.textContent?.trim()
-                if (!name || !this.audio_formats.test(name)) return
+setupClickIcons() {
+    // 移除 playerOverrideEnabled 检查，让配置决定是否启用
+    if (!cfg.auto_play) return;
+    
+    const bind = () => {
+        document.querySelectorAll('li.file:not([data-mmp-bound])').forEach(li => {
+            const a = li.querySelector('a[href]')
+            const name = a?.textContent?.trim()
+            if (!name || !this.audio_formats.test(name)) return
 
-                const icon = li.querySelector('span.icon')
-                if (!icon) return
+            const icon = li.querySelector('span.icon')
+            if (!icon) return
 
-                icon.classList.add('mmp-audio-icon')
-                icon.style.cursor = 'pointer'
-                icon.title = 'Click to play'
+            icon.classList.add('mmp-audio-icon')
+            icon.style.cursor = 'pointer'
+            icon.title = 'Click to play'
 
-                icon.removeEventListener('click', this.handleIconClick)
-                icon.addEventListener('click', this.handleIconClick.bind(this), { capture: true })
+            icon.removeEventListener('click', this.handleIconClick)
+            icon.addEventListener('click', this.handleIconClick.bind(this), { capture: true })
 
-                li.dataset.mmpBound = 'true'
-            })
-        }
+            li.dataset.mmpBound = 'true'
+        })
+    }
 
-        bind()
-        const observer = new MutationObserver(bind)
-        observer.observe(document.body, { childList: true, subtree: true })
-    },
+    bind()
+    const observer = new MutationObserver(bind)
+    observer.observe(document.body, { childList: true, subtree: true })
+},
 
     handleIconClick(e) {
         if (!cfg.auto_play || !playerOverrideEnabled) return;
@@ -1120,51 +1120,52 @@ const MMP = {
         this.isDragging = false
     },
 
-    async audio(entry) {
-        if (!cfg.auto_play || !playerOverrideEnabled) return;
+async audio(entry) {
+    // 移除这个检查，让音频播放始终可以工作
+    // if (!cfg.auto_play || !playerOverrideEnabled) return;
 
-        if (this.isRemoteControlled) return
+    if (this.isRemoteControlled) return
 
-        const folderUri = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/'
+    const folderUri = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/'
 
-        if (this.playlist.length && this.currentFolder === folderUri) {
-            const idx = this.playlist.findIndex(f =>
-                f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
-            )
-            if (idx >= 0) {
-                this.index = idx
-                return this.play(this.playlist[this.index])
-            }
+    if (this.playlist.length && this.currentFolder === folderUri) {
+        const idx = this.playlist.findIndex(f =>
+            f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
+        )
+        if (idx >= 0) {
+            this.index = idx
+            return this.play(this.playlist[this.index])
         }
+    }
 
-        const playlist = await this.getPlaylist(folderUri)
-        
-        this.originalPlaylistOrder = [...playlist];
-        
-        if (this.shuffleEnabled) {
-            const currentSong = playlist.find(f => 
-                f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
-            );
-            const otherSongs = playlist.filter(f => f !== currentSong);
-            for (let i = otherSongs.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [otherSongs[i], otherSongs[j]] = [otherSongs[j], otherSongs[i]];
-            }
-            this.playlist = currentSong ? [currentSong, ...otherSongs] : [...otherSongs];
-            this.index = 0;
-            this.shuffledPlaylist = [...this.playlist];
-        } else {
-            this.playlist = playlist;
-            const idx = this.playlist.findIndex(f =>
-                f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
-            )
-            this.index = idx >= 0 ? idx : 0
+    const playlist = await this.getPlaylist(folderUri)
+    
+    this.originalPlaylistOrder = [...playlist];
+    
+    if (this.shuffleEnabled) {
+        const currentSong = playlist.find(f => 
+            f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
+        );
+        const otherSongs = playlist.filter(f => f !== currentSong);
+        for (let i = otherSongs.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [otherSongs[i], otherSongs[j]] = [otherSongs[j], otherSongs[i]];
         }
-        
-        this.currentFolder = folderUri
-        
-        this.play(this.playlist[this.index])
-    },
+        this.playlist = currentSong ? [currentSong, ...otherSongs] : [...otherSongs];
+        this.index = 0;
+        this.shuffledPlaylist = [...this.playlist];
+    } else {
+        this.playlist = playlist;
+        const idx = this.playlist.findIndex(f =>
+            f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
+        )
+        this.index = idx >= 0 ? idx : 0
+    }
+    
+    this.currentFolder = folderUri
+    
+    this.play(this.playlist[this.index])
+},
 
     async play(entry) {
         const root = document.getElementById('mmp-audio')
@@ -1238,7 +1239,7 @@ const MMP = {
                 }
             } else {
                 let cacheInfo = null
-                if (this.cfg.cache_check && isSpecialFormat) {
+                if (this.cfg.enable_lossless_and_cache && isSpecialFormat) {
                     cacheInfo = await this.checkCachedVersion(entry.uri)
                 }
 
@@ -1631,7 +1632,7 @@ const MMP = {
     },
 
     async startCacheProbe(originalUri) {
-        if (this.loadedFromCache || !this.cfg.cache_check || !this.needTranscodeFormats.test(originalUri)) return;
+        if (this.loadedFromCache || !this.cfg.enable_lossless_and_cache || !this.needTranscodeFormats.test(originalUri)) return;
         
         if (this.cacheProbeInterval) {
             clearInterval(this.cacheProbeInterval);
@@ -1725,7 +1726,7 @@ const MMP = {
     },
 
     async checkCachedVersion(originalUri) {
-        if (!this.cfg.cache_check) return null;
+        if (!this.cfg.enable_lossless_and_cache) return null;
         
         try {
             const decodedUri = decodeURIComponent(originalUri);
