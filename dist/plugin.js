@@ -36,7 +36,7 @@ exports.config = {
     button_height: {
         frontend: true,
         label: "Button height",
-        helperText: "Height of control buttons (e.g. 4vw or 8vh)",
+        helperText: "Height of control buttons (e.g. 4vw or 8vh), vw allows the button size to adjust according to the page width, while vh scales the button size based on the page height. em and px keep the button size fixed.",
         type: 'string',
         defaultValue: '4vw',
         placeholder: "default: 4vw"
