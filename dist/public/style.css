@@ -6,7 +6,7 @@
     width: 100%;
     display: none;
     flex-direction: column;
-    z-index: 9999;
+    z-index: 9;
     background: var(--bg);
     border: 1px solid var(--text);
     border-radius: 0.4em;
@@ -16,7 +16,6 @@
     box-shadow: 0px 0px 4px 4px #0000006b;
     --mmp-button-height: var(--mmp-custom-height, 4vw);
     gap: 0.5em;
-    
     /* 添加过渡效果 */
     transition: bottom 0.3s ease;
 }
@@ -157,7 +156,6 @@ body:has(#paging) .mmp {
 .mmp-filemenu-item {
     padding: 0.5em 1em;
     cursor: pointer;
-    transition: background 0.2s;
     white-space: nowrap;
 }
 
@@ -220,9 +218,8 @@ body:has(#paging) .mmp {
     border-radius: 0.25em;
     padding: 0.3em;
     margin-bottom: 0em;
-    background: 
-    radial-gradient(circle at 1px 1px, rgba(150, 150, 150, 0.15) 1px, transparent 1px);
-    background-size: 6px 6px;
+    background: radial-gradient(circle at 0px 0px, var(--faint-contrast) 1px, transparent 0px);
+    background-size: 8px 8px;
 }
 
 .mmp-progress-container.transcoding {
@@ -243,7 +240,7 @@ body:has(#paging) .mmp {
 .mmp-progress-bar {
     position: relative;
     flex-grow: 1;
-    height: 0.6em;
+    height: 0.5em !important;
     cursor: pointer;
     background: var(--faint-contrast);
     border-radius: 0.25em;
@@ -346,8 +343,7 @@ body:has(#paging) .mmp {
     font-size: clamp(1em, calc(var(--mmp-button-height) * 0.5), 1.8em);
     position: relative;
     overflow: hidden;
-    background: 
-        radial-gradient(circle at 1px 1px, rgba(150, 150, 150, 0.15) 1px, transparent 1px);
+    background: radial-gradient(circle at 0px 0px, var(--faint-contrast) 1px, transparent 0px);
     background-size: 8px 8px;
 }
 
@@ -380,14 +376,11 @@ background-color: var(--text);
     justify-content: center;
     padding: 0;
     font-size: clamp(1em, calc(var(--mmp-button-height) * 1.2), 1.2em);
-    background: var(--bg);
-    background: 
-    radial-gradient(circle at 1px 1px, rgba(150, 150, 150, 0.15) 1px, transparent 1px);
+    background: radial-gradient(circle at 0px 0px, var(--faint-contrast) 1px, transparent 0px);
     background-size: 8px 8px;
 }
 
 button.mmp-play {
-    background: none;
     cursor: pointer;
     padding: 0 0.5em;
     font-size: 0.9em;
