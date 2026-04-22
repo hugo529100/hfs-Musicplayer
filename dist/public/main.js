@@ -106,12 +106,29 @@ function setupOptionsObserver() {
   });
 }
 
-// 原有的 fileMenu 事件处理 - 添加状态检查
+// ========== 修改：fileMenu 事件处理 - 同时支持文件和文件夹 ==========
 if (cfg.use_file_menu) {
-    HFS.onEvent('fileMenu', ({ entry }) =>
-        MMP.audio_formats.test(entry.uri)
-        && { label: t`Play audio`, icon: 'play', onClick: () => MMP.audio(entry) }
-    )
+    HFS.onEvent('fileMenu', ({ entry }) => {
+        // 如果是文件夹，显示 Play folder in Musicplayer+ 选项
+        if (entry.isFolder) {
+            return {
+                id: 'mmp-play-folder',
+                icon: 'play',
+                label: t`Play with Musicplayer+`,
+                onClick: () => MMP.playFolder(entry)
+            }
+        }
+        // 如果是音频文件，显示 Play audio 选项
+        if (MMP.audio_formats.test(entry.uri)) {
+            return {
+                id: 'mmp-play-file',
+                icon: 'play',
+                label: t`Play audio`,
+                onClick: () => MMP.audio(entry)
+            }
+        }
+        return null
+    })
 }
 
 // 原有的 fileList 事件处理 - 不应该受 playerOverrideEnabled 影响
@@ -164,6 +181,241 @@ const MMP = {
     shuffleEnabled: getShuffleState(),
     originalPlaylistOrder: [],
     shuffledPlaylist: [],
+
+// 修复 debugSimple 函数
+async debugSimple(folderPath) {
+    console.log('=== SIMPLE DEBUG ===');
+    
+    // 确保路径格式正确
+    let cleanPath = folderPath;
+    if (!cleanPath.startsWith('/')) {
+        cleanPath = '/' + cleanPath;
+    }
+    if (!cleanPath.endsWith('/')) {
+        cleanPath = cleanPath + '/';
+    }
+    
+    console.log('Clean path:', cleanPath);
+    console.log('Encoded:', encodeURIComponent(cleanPath));
+    
+    const apiUrl = `/~/api/get_file_list?uri=${encodeURIComponent(cleanPath)}`;
+    console.log('API URL:', apiUrl);
+    
+    try {
+        const response = await fetch(apiUrl);
+        console.log('Response status:', response.status);
+        
+        if (!response.ok) {
+            console.error('API returned:', response.status, response.statusText);
+            return { error: `HTTP ${response.status}` };
+        }
+        
+        const data = await response.json();
+        console.log('Response:', data);
+        
+        if (data && data.list) {
+            console.log(`\nFound ${data.list.length} items:`);
+            data.list.forEach(item => {
+                const type = item.isFolder ? '[DIR]' : '[FILE]';
+                const isAudio = this.audio_formats && this.audio_formats.test(item.n) ? ' [AUDIO]' : '';
+                console.log(`  ${type} ${item.n}${isAudio}`);
+            });
+        }
+        
+        return data;
+    } catch (error) {
+        console.error('Fetch error:', error);
+        return { error: error.message };
+    }
+},
+
+// 修复版 - 使用正确的 API 端点
+async getRecursivePlaylist(folderUri) {
+    console.log('=== Recursive Scan Started ===');
+    console.log('Start URI:', folderUri);
+    
+    let allFiles = [];
+    const queue = [folderUri];
+    const processed = new Set();
+    
+    while (queue.length > 0) {
+        const currentUri = queue.shift();
+        
+        if (processed.has(currentUri)) continue;
+        processed.add(currentUri);
+        
+        try {
+            let scanUri = currentUri;
+            if (!scanUri.endsWith('/')) scanUri = scanUri + '/';
+            
+            // 使用正确的 API 格式
+            const apiUrl = `${scanUri}?get=list&folders=*`;
+            console.log('Scanning:', apiUrl);
+            
+            const response = await fetch(apiUrl);
+            if (!response.ok) {
+                console.warn(`Failed: ${response.status}`);
+                continue;
+            }
+            
+            const text = await response.text();
+            // 解析返回的文本（每行一个 URL）
+            const lines = text.split('\n').filter(line => line.trim());
+            
+            console.log(`Found ${lines.length} items`);
+            
+            for (const line of lines) {
+                const url = line.trim();
+                if (!url) continue;
+                
+                // 从 URL 中提取文件名
+                const fileName = decodeURIComponent(url.split('/').pop());
+                
+                // 判断是文件夹还是文件
+                if (url.endsWith('/')) {
+                    // 是文件夹
+                    console.log(`  [DIR] Found folder: ${fileName}`);
+                    queue.push(url);
+                } else {
+                    // 是文件，检查是否是音频
+                    if (/\.(mp3|flac|wav|ogg|m4a|aac|opus|wma|aiff)$/i.test(fileName)) {
+                        console.log(`  [AUDIO] Found: ${fileName}`);
+                        allFiles.push({
+                            name: fileName,
+                            uri: url,
+                            size: 0
+                        });
+                    }
+                }
+            }
+            
+            // 避免请求过快
+            await new Promise(r => setTimeout(r, 200));
+            
+        } catch (error) {
+            console.error(`Error scanning ${currentUri}:`, error);
+        }
+    }
+    
+    // 去重
+    const unique = [];
+    const seen = new Set();
+    for (const file of allFiles) {
+        if (!seen.has(file.uri)) {
+            seen.add(file.uri);
+            unique.push(file);
+        }
+    }
+    
+    console.log(`\n=== Complete: Found ${unique.length} audio files ===`);
+    if (unique.length > 0) {
+        console.log('First 5 files:');
+        unique.slice(0, 5).forEach((f, i) => {
+            console.log(`  ${i+1}. ${f.name}`);
+        });
+    }
+    
+    return unique;
+},
+
+// 修复 playFolder
+async playFolder(entry) {
+    console.log('=== Play Folder ===');
+    console.log('Entry:', entry);
+    
+    // 构建正确的 URI
+    let folderUri = entry.uri;
+    
+    // 确保是绝对路径
+    if (folderUri && !folderUri.startsWith('/')) {
+        folderUri = '/' + folderUri;
+    }
+    
+    // 确保以 / 结尾
+    if (folderUri && !folderUri.endsWith('/')) {
+        folderUri = folderUri + '/';
+    }
+    
+    console.log('Final folder URI:', folderUri);
+    console.log('Folder name:', entry.name);
+    
+    // 显示播放器
+    const root = document.getElementById('mmp-audio');
+    if (root) {
+        root.style.display = 'flex';
+        const title = root.querySelector('.mmp-title');
+        if (title) {
+            title.textContent = `Scanning: ${entry.name || 'folder'}...`;
+        }
+    }
+    
+    try {
+        // 先测试 API 是否可用
+        const testUrl = `/~/api/get_file_list?uri=${encodeURIComponent(folderUri)}`;
+        console.log('Test API:', testUrl);
+        
+        const testResponse = await fetch(testUrl);
+        if (!testResponse.ok) {
+            throw new Error(`Cannot access folder: HTTP ${testResponse.status}`);
+        }
+        
+        // 扫描所有音频文件
+        const playlist = await this.getRecursivePlaylist(folderUri);
+        
+        console.log(`Scan complete! Found ${playlist.length} audio files`);
+        
+        if (playlist.length === 0) {
+            const title = root?.querySelector('.mmp-title');
+            if (title) {
+                title.textContent = `No audio files in "${entry.name}"`;
+                title.style.color = 'var(--bad)';
+            }
+            console.error('No audio files found!');
+            return;
+        }
+        
+        // 更新标题
+        const title = root?.querySelector('.mmp-title');
+        if (title) {
+            title.textContent = `${playlist.length} songs - ${entry.name}`;
+            title.style.color = '';
+            setTimeout(() => {
+                if (title && title.textContent && title.textContent.includes('songs -')) {
+                    title.textContent = playlist[0].name.replace(/\.[^.]+$/, '');
+                }
+            }, 2000);
+        }
+        
+        // 设置播放列表
+        this.originalPlaylistOrder = [...playlist];
+        
+        if (this.shuffleEnabled) {
+            for (let i = playlist.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [playlist[i], playlist[j]] = [playlist[j], playlist[i]];
+            }
+            this.playlist = playlist;
+            this.index = 0;
+            this.shuffledPlaylist = [...this.playlist];
+        } else {
+            this.playlist = playlist;
+            this.index = 0;
+        }
+        
+        this.currentFolder = folderUri;
+        
+        // 开始播放
+        await this.play(this.playlist[this.index]);
+        
+    } catch (error) {
+        console.error('Error in playFolder:', error);
+        const title = root?.querySelector('.mmp-title');
+        if (title) {
+            title.textContent = `Error: ${error.message}`;
+            title.style.color = 'var(--bad)';
+        }
+    }
+},
 
 async init() {
     setupOptionsObserver();
@@ -1906,37 +2158,45 @@ async audio(entry) {
         if (volDisplay) volDisplay.textContent = `${Math.round(newVol * 100)}%`;
     },
 
-    stop() {
-        const root = document.getElementById('mmp-audio');
-        if (!root) return;
+stop() {
+    const root = document.getElementById('mmp-audio');
+    if (!root) return;
 
-        if (this.cacheProbeInterval) {
-            clearInterval(this.cacheProbeInterval);
-            this.cacheProbeInterval = null;
-        }
+    // 如果正在扫描（标题包含 Scanning），不要自动关闭
+    const title = root.querySelector('.mmp-title');
+    if (title && title.textContent && title.textContent.includes('Scanning')) {
+        console.log('Preventing stop() during scanning');
+        return;
+    }
 
-        const audio = this.audioElement;
-        const title = root.querySelector('.mmp-title');
-        const bitrateDisplay = root.querySelector('.mmp-bitrate');
+    if (this.cacheProbeInterval) {
+        clearInterval(this.cacheProbeInterval);
+        this.cacheProbeInterval = null;
+    }
 
-        root.style.display = 'none';
+    const audio = this.audioElement;
+    const bitrateDisplay = root.querySelector('.mmp-bitrate');
+
+    root.style.display = 'none';
+    if (audio) {
         audio.pause();
         audio.src = '';
-        if (title) {
-            title.innerText = '';
-            title.style.color = '';
-        }
-        if (bitrateDisplay) {
-            bitrateDisplay.textContent = '';
-        }
-        this.isPlaying = false;
-        this.isDragging = false;
-        this.ffmpegAttempted = false;
-        this.isTranscoded = false;
-        this.loadedFromCache = false;
-        this.currentPlayingUri = '';
-        this.currentPlayingName = '';
     }
+    if (title) {
+        title.innerText = '';
+        title.style.color = '';
+    }
+    if (bitrateDisplay) {
+        bitrateDisplay.textContent = '';
+    }
+    this.isPlaying = false;
+    this.isDragging = false;
+    this.ffmpegAttempted = false;
+    this.isTranscoded = false;
+    this.loadedFromCache = false;
+    this.currentPlayingUri = '';
+    this.currentPlayingName = '';
+}
 }
 
 MMP.init();
