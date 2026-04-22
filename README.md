@@ -1,6 +1,13 @@
 Musicplayer+
 A clean and pure music player that plays directly when clicking file icons.
 
+
+
+
+260422: fix some bug ，and add play folder funtion (include sub folders).
+![Uploading Screenshot_2026-04-22-19-57-37-690_com.android.chrome.jpg…]()
+
+
 260414-bugfix：      https://github.com/hugo529100/hfs-Musicplayer/issues/6
 
 Fixed the bug where the play button appears and is non-functional on the frontend when "Use Musicplayer+" is unchecked on the frontend page and "Show play button in the file list" is enabled in the backend.
