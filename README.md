@@ -5,7 +5,8 @@ A clean and pure music player that plays directly when clicking file icons.
 
 
 260422: fix some bug ，and add play folder funtion (include sub folders).
-![Uploading Screenshot_2026-04-22-19-57-37-690_com.android.chrome.jpg…]()
+<img width="1080" height="2400" alt="Screenshot_2026-04-22-20-01-02-009_com android chrome" src="https://github.com/user-attachments/assets/875b977e-08c5-41d2-ba43-420740d1a8e1" />
+
 
 
 260414-bugfix：      https://github.com/hugo529100/hfs-Musicplayer/issues/6
