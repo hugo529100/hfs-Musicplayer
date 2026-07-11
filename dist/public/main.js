@@ -374,7 +374,9 @@ async init() {
 
 // ========== 图标劫持系统 ==========
 startIconHijacker() {
+    // 两次延时劫持即可覆盖绝大多数情况
     setTimeout(() => this.hijackAllIcons(), 300);
+    setTimeout(() => this.hijackAllIcons(), 1000);
     
     const observer = new MutationObserver((mutations) => {
         let shouldHijack = false;
@@ -397,7 +399,9 @@ startIconHijacker() {
             if (shouldHijack) break;
         }
         if (shouldHijack) {
-            setTimeout(() => this.hijackAllIcons(), 100);
+            setTimeout(() => this.hijackAllIcons(), 150);
+            // 二次兜底
+            setTimeout(() => this.hijackAllIcons(), 600);
         }
     });
     
