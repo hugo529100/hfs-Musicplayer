@@ -1,8 +1,6 @@
 const { h, t } = HFS
 const cfg = HFS.getPluginConfig()
 
-// 前端播放器接管开关的存储键名
-const PLAYER_OVERRIDE_STORAGE_KEY = 'mmp_player_override_enabled'
 // 随机播放状态存储键名
 const SHUFFLE_STORAGE_KEY = 'mmp_shuffle_enabled'
 
@@ -14,20 +12,6 @@ const isLocalStorageSupported = () => {
     return true;
   } catch (e) {
     return false;
-  }
-};
-
-// 获取播放器接管状态（默认为 true - 开启）
-const getPlayerOverrideState = () => {
-  if (!isLocalStorageSupported()) return true;
-  const val = localStorage.getItem(PLAYER_OVERRIDE_STORAGE_KEY);
-  return val === null ? true : val === 'true';
-};
-
-// 保存播放器接管状态
-const setPlayerOverrideState = (value) => {
-  if (isLocalStorageSupported()) {
-    localStorage.setItem(PLAYER_OVERRIDE_STORAGE_KEY, value ? 'true' : 'false');
   }
 };
 
@@ -45,71 +29,12 @@ const setShuffleState = (value) => {
   }
 };
 
-// 全局变量保存播放器接管状态
-let playerOverrideEnabled = getPlayerOverrideState();
-
 const isAppleDevice = /iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent) && !window.MSStream
 const unsupportedPlugin = HFS.plugins['unsupported-videos'] || HFS.plugins['unsupported-videos']
 
-// 在 Options 界面添加播放器接管开关
-function insertPlayerOverrideToggle() {
-  const optionsDialog = document.querySelector('.dialog[aria-modal="true"]');
-  if (!optionsDialog || document.getElementById('mmp-player-override-toggle')) return;
-
-  // 检查后台 auto_play 是否启用
-  if (!cfg.auto_play) return;
-
-  const themeSelect = document.getElementById('option-theme');
-  if (!themeSelect) return;
-
-  // 创建开关元素
-  const toggleHTML = `
-    <div id="mmp-player-override-toggle" style="display:block;margin-top:1em">
-      <label style="display:block;cursor:pointer">
-        <input type="checkbox" id="mmp-player-override-checkbox">
-        Use Musicplayer+
-      </label>
-      <small style="display:block;color:var(--color-2);margin-top:0.25em">Take control of the default audio player</small>
-    </div>
-  `;
-
-  // 插入到 theme 选择器后面
-  themeSelect.insertAdjacentHTML('afterend', toggleHTML);
-
-  // 设置初始状态
-  const checkbox = document.getElementById('mmp-player-override-checkbox');
-  checkbox.checked = playerOverrideEnabled;
-
-  // 添加事件监听
-checkbox.addEventListener('change', (e) => {
-    playerOverrideEnabled = e.target.checked;
-    setPlayerOverrideState(playerOverrideEnabled);
-    
-    console.log(`Player override ${playerOverrideEnabled ? 'enabled' : 'disabled'}`);
-    
-    // 刷新文件列表
-    HFS.reloadList?.();
-});
-}
-
-// 监听 Options 对话框的出现
-function setupOptionsObserver() {
-  const observer = new MutationObserver((mutations) => {
-    if (document.querySelector('.dialog-title')?.textContent?.includes('Options')) {
-      setTimeout(insertPlayerOverrideToggle, 100);
-    }
-  });
-
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
-}
-
-// ========== 修改：fileMenu 事件处理 - 同时支持文件和文件夹 ==========
+// ========== fileMenu 事件处理 - 同时支持文件和文件夹 ==========
 if (cfg.use_file_menu) {
     HFS.onEvent('fileMenu', ({ entry }) => {
-        // 如果是文件夹，显示 Play folder in Musicplayer+ 选项
         if (entry.isFolder) {
             return {
                 id: 'mmp-play-folder',
@@ -118,7 +43,6 @@ if (cfg.use_file_menu) {
                 onClick: () => MMP.playFolder(entry)
             }
         }
-        // 如果是音频文件，显示 Play audio 选项
         if (MMP.audio_formats.test(entry.uri)) {
             return {
                 id: 'mmp-play-file',
@@ -131,12 +55,11 @@ if (cfg.use_file_menu) {
     })
 }
 
-// 原有的 fileList 事件处理 - 不应该受 playerOverrideEnabled 影响
+// fileList 事件处理
 if (cfg.use_file_list) {
     HFS.onEvent('afterEntryName', ({ entry }, { setOrder }) => {
         setOrder(-1)
         if (MMP.audio_formats.test(entry.uri)) {
-            // 移除 playerOverrideEnabled 检查，始终显示播放按钮
             return h('button', {
                 className: 'mmp-play',
                 onClick: () => MMP.audio(entry),
@@ -181,12 +104,11 @@ const MMP = {
     shuffleEnabled: getShuffleState(),
     originalPlaylistOrder: [],
     shuffledPlaylist: [],
+    hijackedIcons: new WeakSet(),
 
-// 修复 debugSimple 函数
 async debugSimple(folderPath) {
     console.log('=== SIMPLE DEBUG ===');
     
-    // 确保路径格式正确
     let cleanPath = folderPath;
     if (!cleanPath.startsWith('/')) {
         cleanPath = '/' + cleanPath;
@@ -229,7 +151,6 @@ async debugSimple(folderPath) {
     }
 },
 
-// 修复版 - 使用正确的 API 端点
 async getRecursivePlaylist(folderUri) {
     console.log('=== Recursive Scan Started ===');
     console.log('Start URI:', folderUri);
@@ -248,7 +169,6 @@ async getRecursivePlaylist(folderUri) {
             let scanUri = currentUri;
             if (!scanUri.endsWith('/')) scanUri = scanUri + '/';
             
-            // 使用正确的 API 格式
             const apiUrl = `${scanUri}?get=list&folders=*`;
             console.log('Scanning:', apiUrl);
             
@@ -259,7 +179,6 @@ async getRecursivePlaylist(folderUri) {
             }
             
             const text = await response.text();
-            // 解析返回的文本（每行一个 URL）
             const lines = text.split('\n').filter(line => line.trim());
             
             console.log(`Found ${lines.length} items`);
@@ -268,16 +187,12 @@ async getRecursivePlaylist(folderUri) {
                 const url = line.trim();
                 if (!url) continue;
                 
-                // 从 URL 中提取文件名
                 const fileName = decodeURIComponent(url.split('/').pop());
                 
-                // 判断是文件夹还是文件
                 if (url.endsWith('/')) {
-                    // 是文件夹
                     console.log(`  [DIR] Found folder: ${fileName}`);
                     queue.push(url);
                 } else {
-                    // 是文件，检查是否是音频
                     if (/\.(mp3|flac|wav|ogg|m4a|aac|opus|wma|aiff)$/i.test(fileName)) {
                         console.log(`  [AUDIO] Found: ${fileName}`);
                         allFiles.push({
@@ -289,7 +204,6 @@ async getRecursivePlaylist(folderUri) {
                 }
             }
             
-            // 避免请求过快
             await new Promise(r => setTimeout(r, 200));
             
         } catch (error) {
@@ -297,7 +211,6 @@ async getRecursivePlaylist(folderUri) {
         }
     }
     
-    // 去重
     const unique = [];
     const seen = new Set();
     for (const file of allFiles) {
@@ -318,20 +231,16 @@ async getRecursivePlaylist(folderUri) {
     return unique;
 },
 
-// 修复 playFolder
 async playFolder(entry) {
     console.log('=== Play Folder ===');
     console.log('Entry:', entry);
     
-    // 构建正确的 URI
     let folderUri = entry.uri;
     
-    // 确保是绝对路径
     if (folderUri && !folderUri.startsWith('/')) {
         folderUri = '/' + folderUri;
     }
     
-    // 确保以 / 结尾
     if (folderUri && !folderUri.endsWith('/')) {
         folderUri = folderUri + '/';
     }
@@ -339,7 +248,6 @@ async playFolder(entry) {
     console.log('Final folder URI:', folderUri);
     console.log('Folder name:', entry.name);
     
-    // 显示播放器
     const root = document.getElementById('mmp-audio');
     if (root) {
         root.style.display = 'flex';
@@ -350,7 +258,6 @@ async playFolder(entry) {
     }
     
     try {
-        // 先测试 API 是否可用
         const testUrl = `/~/api/get_file_list?uri=${encodeURIComponent(folderUri)}`;
         console.log('Test API:', testUrl);
         
@@ -359,7 +266,6 @@ async playFolder(entry) {
             throw new Error(`Cannot access folder: HTTP ${testResponse.status}`);
         }
         
-        // 扫描所有音频文件
         const playlist = await this.getRecursivePlaylist(folderUri);
         
         console.log(`Scan complete! Found ${playlist.length} audio files`);
@@ -374,7 +280,6 @@ async playFolder(entry) {
             return;
         }
         
-        // 更新标题
         const title = root?.querySelector('.mmp-title');
         if (title) {
             title.textContent = `${playlist.length} songs - ${entry.name}`;
@@ -386,7 +291,6 @@ async playFolder(entry) {
             }, 2000);
         }
         
-        // 设置播放列表
         this.originalPlaylistOrder = [...playlist];
         
         if (this.shuffleEnabled) {
@@ -404,7 +308,6 @@ async playFolder(entry) {
         
         this.currentFolder = folderUri;
         
-        // 开始播放
         await this.play(this.playlist[this.index]);
         
     } catch (error) {
@@ -418,13 +321,6 @@ async playFolder(entry) {
 },
 
 async init() {
-    setupOptionsObserver();
-    
-    // 只让图标点击受 playerOverrideEnabled 控制
-    if (cfg.auto_play) {
-        document.addEventListener('click', this.handleFileClick.bind(this), true)
-    }
-    
     const savedVol = localStorage.getItem('mmp_volume')
     if (savedVol) {
         this.cfg.audio_vol = parseFloat(savedVol)
@@ -441,46 +337,136 @@ async init() {
     this.initPlayerElement()
     this.setupAudioBindings()
     
-    // 只让图标点击受 playerOverrideEnabled 控制
     if (cfg.auto_play) {
-        this.setupClickIcons()
+        this.startIconHijacker();
     }
     
     if (window.HFS && HFS.onEvent) {
         HFS.onEvent('configChanged', (newCfg) => {
             this.cfg = { ...this.cfg, ...newCfg }
             document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
-            
-            if (this.cfg.auto_play) {
-                setTimeout(insertPlayerOverrideToggle, 100);
-            }
         })
         
         HFS.onEvent('afterList', () => {
-            // 移除了 playerOverrideEnabled 检查
-            if (cfg.auto_play) {
-                this.setupClickIcons()
-            }
             if (this.isPlaying) {
                 document.getElementById('mmp-audio').style.display = 'flex'
             }
+            if (cfg.auto_play) {
+                setTimeout(() => this.hijackAllIcons(), 200);
+            }
         })
 
-            if (this.cfg.enable_cache) {
-                window.addEventListener('beforeunload', () => {
-                    this.persistPlaylistData()
-                })
-            }
-
-            HFS.onEvent('remotePlay', ({ uri }) => {
-                this.handleRemotePlay(uri)
-            })
-
-            HFS.onEvent('remoteStop', () => {
-                this.handleRemoteStop()
+        if (this.cfg.enable_cache) {
+            window.addEventListener('beforeunload', () => {
+                this.persistPlaylistData()
             })
         }
-    },
+
+        HFS.onEvent('remotePlay', ({ uri }) => {
+            this.handleRemotePlay(uri)
+        })
+
+        HFS.onEvent('remoteStop', () => {
+            this.handleRemoteStop()
+        })
+    }
+},
+
+// ========== 图标劫持系统 ==========
+startIconHijacker() {
+    setTimeout(() => this.hijackAllIcons(), 300);
+    
+    const observer = new MutationObserver((mutations) => {
+        let shouldHijack = false;
+        for (const mutation of mutations) {
+            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType === 1) {
+                        if (node.querySelector && (
+                            node.querySelector('li.file') ||
+                            node.classList.contains('file') ||
+                            node.classList.contains('list-wrapper') ||
+                            node.querySelector('.icon')
+                        )) {
+                            shouldHijack = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (shouldHijack) break;
+        }
+        if (shouldHijack) {
+            setTimeout(() => this.hijackAllIcons(), 100);
+        }
+    });
+    
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+},
+
+hijackAllIcons() {
+    if (!cfg.auto_play) return;
+    
+    const fileItems = document.querySelectorAll('li.file');
+    
+    fileItems.forEach((li) => {
+        if (li.dataset.mmpIconHijacked === 'true') return;
+        
+        const a = li.querySelector('a[href]');
+        const name = a?.textContent?.trim();
+        if (!name || !this.audio_formats.test(name)) return;
+        
+        // 找到图标元素
+        const icon = li.querySelector('span.icon, [class*="media-icon"]');
+        if (!icon) return;
+        
+        li.dataset.mmpIconHijacked = 'true';
+        
+        const entry = this.findEntryByName(name) || { 
+            name, 
+            uri: a.href,
+            ext: name.split('.').pop().toLowerCase()
+        };
+        
+        // 找到图标的可点击包裹元素
+        let iconWrapper = icon;
+        if (icon.parentElement && icon.parentElement.tagName === 'SPAN' && 
+            icon.parentElement !== li.querySelector('a') &&
+            icon.parentElement.querySelector('span.icon, [class*="media-icon"]')) {
+            iconWrapper = icon.parentElement;
+        }
+        
+        iconWrapper.style.cursor = 'pointer';
+        iconWrapper.title = 'Click to play with Musicplayer+';
+        
+        this.hijackElementClicks(iconWrapper, entry);
+    });
+},
+
+hijackElementClicks(element, entry) {
+    if (!element || this.hijackedIcons.has(element)) return;
+    
+    this.hijackedIcons.add(element);
+    
+    // 捕获阶段拦截，优先级最高
+    element.addEventListener('click', (e) => {
+        e.stopImmediatePropagation();
+        e.stopPropagation();
+        e.preventDefault();
+        this.audio(entry);
+    }, true);
+    
+    // 冒泡阶段也拦截，双重保险
+    element.addEventListener('click', (e) => {
+        e.stopImmediatePropagation();
+        e.stopPropagation();
+        e.preventDefault();
+        this.audio(entry);
+    }, false);
+},
 
     // 显示当前播放文件的 fileMenu
     async showFileMenuForCurrentSong() {
@@ -490,11 +476,9 @@ async init() {
         }
         
         try {
-            // 获取当前播放文件的 entry 信息
             const fileName = this.currentPlayingName + (this.currentPlayingUri.match(/\.[^.]+$/)?.[0] || '');
             const folderUri = this.currentPlayingUri.replace(/\/[^/]+$/, '') + '/';
             
-            // 构建 entry 对象
             const entry = {
                 name: fileName,
                 uri: this.currentPlayingUri,
@@ -502,7 +486,6 @@ async init() {
                 ext: fileName.split('.').pop().toLowerCase()
             };
             
-            // 获取文件列表以获取完整信息
             const response = await fetch(`/~/api/get_file_list?uri=${encodeURIComponent(folderUri)}`);
             const data = await response.json();
             const fileInfo = data.list?.find(f => f.n === fileName);
@@ -512,15 +495,12 @@ async init() {
                 entry.modified = fileInfo.m;
             }
             
-            // 触发 fileMenu 事件
             if (HFS.onEvent && HFS.emitEvent) {
-                // 创建菜单容器
                 const menuContainer = this.createFileMenuContainer(entry);
                 if (menuContainer) {
                     document.body.appendChild(menuContainer);
                 }
             } else {
-                // 降级方案：显示简单的菜单
                 this.showSimpleFileMenu(entry);
             }
         } catch (error) {
@@ -529,13 +509,10 @@ async init() {
         }
     },
     
-    // 创建 fileMenu 容器
     createFileMenuContainer(entry) {
         try {
-            // 收集所有菜单项
             const menuItems = [];
             
-            // 添加默认菜单项
             menuItems.push({
                 id: 'download',
                 label: 'Download',
@@ -550,10 +527,6 @@ async init() {
                 onClick: () => this.showFileInfo(entry)
             });
             
-            // 如果有自定义的 fileMenu 事件监听器，这里可以触发它们
-            // 由于无法直接调用其他插件的监听器，我们提供一个扩展点
-            
-            // 创建菜单 DOM
             const menu = document.createElement('div');
             menu.className = 'mmp-filemenu-popup';
             menu.style.cssText = `
@@ -591,7 +564,6 @@ async init() {
                 menu.appendChild(menuItem);
             });
             
-            // 点击其他地方关闭菜单
             const closeMenu = (e) => {
                 if (!menu.contains(e.target)) {
                     menu.remove();
@@ -604,7 +576,6 @@ async init() {
                 document.addEventListener('contextmenu', closeMenu);
             }, 0);
             
-            // 定位菜单
             const fileMenuBtn = document.querySelector('.mmp-filemenu-btn');
             if (fileMenuBtn) {
                 const rect = fileMenuBtn.getBoundingClientRect();
@@ -622,7 +593,6 @@ async init() {
         }
     },
     
-    // 简单的文件菜单降级方案
     showSimpleFileMenu(entry) {
         const menu = document.createElement('div');
         menu.className = 'mmp-filemenu-popup';
@@ -680,7 +650,6 @@ async init() {
         document.body.appendChild(menu);
     },
     
-    // 下载当前播放的文件
     downloadCurrentFile() {
         if (this.currentPlayingUri) {
             const link = document.createElement('a');
@@ -692,7 +661,6 @@ async init() {
         }
     },
     
-    // 显示文件信息
     showFileInfo(entry) {
         const infoDialog = document.createElement('div');
         infoDialog.className = 'mmp-fileinfo-dialog';
@@ -727,7 +695,6 @@ async init() {
         const closeBtn = infoDialog.querySelector('button');
         closeBtn.onclick = () => infoDialog.remove();
         
-        // 点击背景关闭
         infoDialog.addEventListener('click', (e) => {
             if (e.target === infoDialog) infoDialog.remove();
         });
@@ -735,7 +702,6 @@ async init() {
         document.body.appendChild(infoDialog);
     },
     
-    // 格式化文件大小
     formatFileSize(bytes) {
         if (!bytes) return 'Unknown';
         const units = ['B', 'KB', 'MB', 'GB'];
@@ -748,7 +714,6 @@ async init() {
         return `${size.toFixed(1)} ${units[unitIndex]}`;
     },
 
-    // 添加文件菜单按钮
     addFileMenuButton() {
         const headerControls = document.querySelector('.mmp-header-controls');
         if (!headerControls) return;
@@ -766,7 +731,6 @@ async init() {
             this.showFileMenuForCurrentSong();
         });
         
-        // 插入到音量控件和关闭按钮之间
         const volumeControl = headerControls.querySelector('.mmp-volume-control');
         const closeBtn = headerControls.querySelector('.mmp-close');
         
@@ -824,37 +788,6 @@ async init() {
         } while (nextIndex === this.index && this.playlist.length > 1);
         
         return nextIndex;
-    },
-
-    handleFileClick(e) {
-        if (!cfg.auto_play || !playerOverrideEnabled) return;
-        
-        const target = e.target.closest('li.file a[href], li.file span.icon, li.file .mmp-audio-icon, li.file .mmp-play')
-        if (!target) return
-        
-        const li = target.closest('li.file')
-        if (!li) return
-        
-        const nameElement = li.querySelector('a[href]')
-        if (!nameElement) return
-        
-        const fileName = nameElement.textContent.trim()
-        if (!this.audio_formats.test(fileName)) return
-        
-        if (!this.cfg.auto_play) return
-        
-        e.preventDefault()
-        e.stopImmediatePropagation()
-        e.stopPropagation()
-        
-        const entry = this.findEntryByName(fileName) || { 
-            name: fileName, 
-            uri: nameElement.href 
-        }
-        
-        this.audio(entry)
-        
-        return false
     },
 
     async initIndexedDB() {
@@ -1113,55 +1046,6 @@ async init() {
         }
     },
 
-setupClickIcons() {
-    // 移除 playerOverrideEnabled 检查，让配置决定是否启用
-    if (!cfg.auto_play) return;
-    
-    const bind = () => {
-        document.querySelectorAll('li.file:not([data-mmp-bound])').forEach(li => {
-            const a = li.querySelector('a[href]')
-            const name = a?.textContent?.trim()
-            if (!name || !this.audio_formats.test(name)) return
-
-            const icon = li.querySelector('span.icon')
-            if (!icon) return
-
-            icon.classList.add('mmp-audio-icon')
-            icon.style.cursor = 'pointer'
-            icon.title = 'Click to play'
-
-            icon.removeEventListener('click', this.handleIconClick)
-            icon.addEventListener('click', this.handleIconClick.bind(this), { capture: true })
-
-            li.dataset.mmpBound = 'true'
-        })
-    }
-
-    bind()
-    const observer = new MutationObserver(bind)
-    observer.observe(document.body, { childList: true, subtree: true })
-},
-
-    handleIconClick(e) {
-        if (!cfg.auto_play || !playerOverrideEnabled) return;
-        
-        if (!this.cfg.auto_play) return
-        
-        e.stopImmediatePropagation()
-        e.preventDefault()
-        
-        const li = e.target.closest('li.file')
-        if (!li) return
-        
-        const a = li.querySelector('a[href]')
-        const name = a?.textContent?.trim()
-        
-        if (name && this.audio_formats.test(name)) {
-            const entry = this.findEntryByName(name) || { name, uri: a.href }
-            this.audio(entry)
-        }
-    },
-
     findEntryByName(name) {
         const list = window.HFS?.state?.list || []
         return list.find(e => e.n === name)
@@ -1215,7 +1099,6 @@ setupClickIcons() {
 
         this.audioElement = document.querySelector('#mmp-audio audio')
         
-        // 添加文件菜单按钮
         this.addFileMenuButton();
         
         const shuffleBtn = document.querySelector('.mmp-shuffle-btn')
@@ -1373,9 +1256,6 @@ setupClickIcons() {
     },
 
 async audio(entry) {
-    // 移除这个检查，让音频播放始终可以工作
-    // if (!cfg.auto_play || !playerOverrideEnabled) return;
-
     if (this.isRemoteControlled) return
 
     const folderUri = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/'
@@ -2162,7 +2042,6 @@ stop() {
     const root = document.getElementById('mmp-audio');
     if (!root) return;
 
-    // 如果正在扫描（标题包含 Scanning），不要自动关闭
     const title = root.querySelector('.mmp-title');
     if (title && title.textContent && title.textContent.includes('Scanning')) {
         console.log('Preventing stop() during scanning');
