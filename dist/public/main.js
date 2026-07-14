@@ -337,11 +337,30 @@ async init() {
     this.initPlayerElement()
     this.setupAudioBindings()
     
-    if (cfg.auto_play) {
-        this.startIconHijacker();
-    }
-    
     if (window.HFS && HFS.onEvent) {
+        
+        // ========== 第一层拦截：entryIcon:after 清空 output ==========
+        // 阻止 hfs-click-icon-to-show 在图标上绑定 HFS.fileShow
+        if (cfg.auto_play) {
+            HFS.onEvent('entryIcon:after', ({ def, entry }, { output }) => {
+                if (!MMP.audio_formats.test(entry.uri)) return;
+                
+                // 保留其他插件（MVfiles-covers）的封面图标
+                const iconDef = output.find(Boolean) || def;
+                
+                // 清空 output，阻止 hfs-click-icon-to-show 添加它的包裹
+                output.length = 0;
+                
+                // 返回带标记的图标，但不在这里绑定事件（交给 DOM 劫持）
+                return HFS.h('span', {
+                    class: 'mmp-audio-icon-target',
+                    'data-mmp-audio': 'true',
+                    style: 'cursor:pointer;display:inline-block;',
+                    title: 'Play with Musicplayer+'
+                }, iconDef);
+            });
+        }
+        
         HFS.onEvent('configChanged', (newCfg) => {
             this.cfg = { ...this.cfg, ...newCfg }
             document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
@@ -369,6 +388,11 @@ async init() {
         HFS.onEvent('remoteStop', () => {
             this.handleRemoteStop()
         })
+    }
+    
+    // ========== 第二层拦截：DOM 劫持（兜底） ==========
+    if (cfg.auto_play) {
+        this.startIconHijacker();
     }
 },
 
@@ -423,8 +447,19 @@ hijackAllIcons() {
         const name = a?.textContent?.trim();
         if (!name || !this.audio_formats.test(name)) return;
         
-        // 找到图标元素
-        const icon = li.querySelector('span.icon, [class*="media-icon"]');
+        // 优先找我们标记的图标包裹，其次找普通图标
+        let icon = li.querySelector('.mmp-audio-icon-target');
+        if (!icon) {
+            icon = li.querySelector('span.icon, [class*="media-icon"]');
+            if (icon) {
+                // 找到父级包裹元素
+                if (icon.parentElement && icon.parentElement.tagName === 'SPAN' && 
+                    icon.parentElement !== li.querySelector('a') &&
+                    icon.parentElement.querySelector('span.icon, [class*="media-icon"]')) {
+                    icon = icon.parentElement;
+                }
+            }
+        }
         if (!icon) return;
         
         li.dataset.mmpIconHijacked = 'true';
@@ -435,18 +470,10 @@ hijackAllIcons() {
             ext: name.split('.').pop().toLowerCase()
         };
         
-        // 找到图标的可点击包裹元素
-        let iconWrapper = icon;
-        if (icon.parentElement && icon.parentElement.tagName === 'SPAN' && 
-            icon.parentElement !== li.querySelector('a') &&
-            icon.parentElement.querySelector('span.icon, [class*="media-icon"]')) {
-            iconWrapper = icon.parentElement;
-        }
+        icon.style.cursor = 'pointer';
+        icon.title = 'Play with Musicplayer+';
         
-        iconWrapper.style.cursor = 'pointer';
-        iconWrapper.title = 'Click to play with Musicplayer+';
-        
-        this.hijackElementClicks(iconWrapper, entry);
+        this.hijackElementClicks(icon, entry);
     });
 },
 
