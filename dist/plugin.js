@@ -1,5 +1,5 @@
 exports.description = "A clean and pure music player that plays directly when clicking file icons."
-exports.version = 6.3
+exports.version = 6.4
 exports.apiRequired = 9.5
 exports.repo = "Hug3O/Musicplayer+"
 exports.frontend_css = "style.css"

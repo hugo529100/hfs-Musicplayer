@@ -105,399 +105,737 @@ const MMP = {
     originalPlaylistOrder: [],
     shuffledPlaylist: [],
     hijackedIcons: new WeakSet(),
+    // ========== Preact 钩子相关属性 ==========
+    _preactHijackerSetup: false,
+    _originalPreactDiffed: null,
+    _originalPreactCommit: null,
+    _hijackTimeoutId: null,
+    _globalInterceptorSetup: false,
+    _hijackObserver: null,
 
-async debugSimple(folderPath) {
-    console.log('=== SIMPLE DEBUG ===');
-    
-    let cleanPath = folderPath;
-    if (!cleanPath.startsWith('/')) {
-        cleanPath = '/' + cleanPath;
-    }
-    if (!cleanPath.endsWith('/')) {
-        cleanPath = cleanPath + '/';
-    }
-    
-    console.log('Clean path:', cleanPath);
-    console.log('Encoded:', encodeURIComponent(cleanPath));
-    
-    const apiUrl = `/~/api/get_file_list?uri=${encodeURIComponent(cleanPath)}`;
-    console.log('API URL:', apiUrl);
-    
-    try {
-        const response = await fetch(apiUrl);
-        console.log('Response status:', response.status);
-        
-        if (!response.ok) {
-            console.error('API returned:', response.status, response.statusText);
-            return { error: `HTTP ${response.status}` };
+    // ========== 检测当前列表是否有音频文件 ==========
+    checkAudioInCurrentList() {
+        const fileItems = document.querySelectorAll('li.file');
+        if (fileItems.length === 0) {
+            return false;
         }
         
-        const data = await response.json();
-        console.log('Response:', data);
-        
-        if (data && data.list) {
-            console.log(`\nFound ${data.list.length} items:`);
-            data.list.forEach(item => {
-                const type = item.isFolder ? '[DIR]' : '[FILE]';
-                const isAudio = this.audio_formats && this.audio_formats.test(item.n) ? ' [AUDIO]' : '';
-                console.log(`  ${type} ${item.n}${isAudio}`);
-            });
-        }
-        
-        return data;
-    } catch (error) {
-        console.error('Fetch error:', error);
-        return { error: error.message };
-    }
-},
-
-async getRecursivePlaylist(folderUri) {
-    console.log('=== Recursive Scan Started ===');
-    console.log('Start URI:', folderUri);
-    
-    let allFiles = [];
-    const queue = [folderUri];
-    const processed = new Set();
-    
-    while (queue.length > 0) {
-        const currentUri = queue.shift();
-        
-        if (processed.has(currentUri)) continue;
-        processed.add(currentUri);
-        
-        try {
-            let scanUri = currentUri;
-            if (!scanUri.endsWith('/')) scanUri = scanUri + '/';
-            
-            const apiUrl = `${scanUri}?get=list&folders=*`;
-            console.log('Scanning:', apiUrl);
-            
-            const response = await fetch(apiUrl);
-            if (!response.ok) {
-                console.warn(`Failed: ${response.status}`);
-                continue;
+        for (const li of fileItems) {
+            const a = li.querySelector('a[href]');
+            if (!a) continue;
+            const name = a.textContent?.trim();
+            if (name && this.audio_formats.test(name)) {
+                return true;
             }
-            
-            const text = await response.text();
-            const lines = text.split('\n').filter(line => line.trim());
-            
-            console.log(`Found ${lines.length} items`);
-            
-            for (const line of lines) {
-                const url = line.trim();
-                if (!url) continue;
-                
-                const fileName = decodeURIComponent(url.split('/').pop());
-                
-                if (url.endsWith('/')) {
-                    console.log(`  [DIR] Found folder: ${fileName}`);
-                    queue.push(url);
-                } else {
-                    if (/\.(mp3|flac|wav|ogg|m4a|aac|opus|wma|aiff)$/i.test(fileName)) {
-                        console.log(`  [AUDIO] Found: ${fileName}`);
-                        allFiles.push({
-                            name: fileName,
-                            uri: url,
-                            size: 0
-                        });
+        }
+        return false;
+    },
+
+    // ========== 判断 VNode 是否为文件列表 ==========
+    isFileListVNode(vnode) {
+        if (!vnode) return false;
+        
+        // 检查类型
+        if (vnode.type === 'ul' || vnode.type === 'div') {
+            const className = vnode.props?.className || '';
+            if (typeof className === 'string') {
+                if (/file|list|entries/.test(className)) {
+                    return true;
+                }
+            }
+        }
+        
+        // 检查 children 中是否有 li.file
+        if (vnode.__k && Array.isArray(vnode.__k)) {
+            for (const child of vnode.__k) {
+                if (child && child.type === 'li') {
+                    const cls = child.props?.className || '';
+                    if (typeof cls === 'string' && cls.includes('file')) {
+                        return true;
                     }
                 }
             }
-            
-            await new Promise(r => setTimeout(r, 200));
-            
-        } catch (error) {
-            console.error(`Error scanning ${currentUri}:`, error);
         }
-    }
-    
-    const unique = [];
-    const seen = new Set();
-    for (const file of allFiles) {
-        if (!seen.has(file.uri)) {
-            seen.add(file.uri);
-            unique.push(file);
-        }
-    }
-    
-    console.log(`\n=== Complete: Found ${unique.length} audio files ===`);
-    if (unique.length > 0) {
-        console.log('First 5 files:');
-        unique.slice(0, 5).forEach((f, i) => {
-            console.log(`  ${i+1}. ${f.name}`);
-        });
-    }
-    
-    return unique;
-},
+        
+        return false;
+    },
 
-async playFolder(entry) {
-    console.log('=== Play Folder ===');
-    console.log('Entry:', entry);
-    
-    let folderUri = entry.uri;
-    
-    if (folderUri && !folderUri.startsWith('/')) {
-        folderUri = '/' + folderUri;
-    }
-    
-    if (folderUri && !folderUri.endsWith('/')) {
-        folderUri = folderUri + '/';
-    }
-    
-    console.log('Final folder URI:', folderUri);
-    console.log('Folder name:', entry.name);
-    
-    const root = document.getElementById('mmp-audio');
-    if (root) {
-        root.style.display = 'flex';
-        const title = root.querySelector('.mmp-title');
-        if (title) {
-            title.textContent = `Scanning: ${entry.name || 'folder'}...`;
-        }
-    }
-    
-    try {
-        const testUrl = `/~/api/get_file_list?uri=${encodeURIComponent(folderUri)}`;
-        console.log('Test API:', testUrl);
+    // ========== Preact 钩子劫持器（最可靠） ==========
+    setupPreactHijacker() {
+        if (this._preactHijackerSetup) return;
         
-        const testResponse = await fetch(testUrl);
-        if (!testResponse.ok) {
-            throw new Error(`Cannot access folder: HTTP ${testResponse.status}`);
-        }
-        
-        const playlist = await this.getRecursivePlaylist(folderUri);
-        
-        console.log(`Scan complete! Found ${playlist.length} audio files`);
-        
-        if (playlist.length === 0) {
-            const title = root?.querySelector('.mmp-title');
-            if (title) {
-                title.textContent = `No audio files in "${entry.name}"`;
-                title.style.color = 'var(--bad)';
-            }
-            console.error('No audio files found!');
+        // 获取 Preact 实例
+        const preact = window.preact || window.Preact;
+        if (!preact || !preact.options) {
+            // 使用控制台输出（已恢复）
+            console.log('MMP: Preact not found, skipping Preact hijacker');
             return;
         }
         
-        const title = root?.querySelector('.mmp-title');
-        if (title) {
-            title.textContent = `${playlist.length} songs - ${entry.name}`;
-            title.style.color = '';
-            setTimeout(() => {
-                if (title && title.textContent && title.textContent.includes('songs -')) {
-                    title.textContent = playlist[0].name.replace(/\.[^.]+$/, '');
+        const options = preact.options;
+        console.log('MMP: Setting up Preact hijacker');
+        
+        // 保存原始回调
+        this._originalPreactDiffed = options.diffed;
+        this._originalPreactCommit = options.__c;
+        
+        const self = this;
+        let hijackTimer = null;
+        
+        // 拦截 diffed 阶段（DOM 已更新，但可能未完全提交）
+        options.diffed = function(vnode) {
+            // 检查是否是文件列表
+            if (self.isFileListVNode(vnode)) {
+                clearTimeout(hijackTimer);
+                hijackTimer = setTimeout(() => {
+                    self._scheduleHijack();
+                }, 30);
+            }
+            
+            // 调用原始回调
+            if (self._originalPreactDiffed) {
+                self._originalPreactDiffed(vnode);
+            }
+        };
+        
+        // 拦截 commit 阶段（更可靠，DOM 已完全提交）
+        options.__c = function(vnode, commitQueue) {
+            if (self.isFileListVNode(vnode)) {
+                clearTimeout(hijackTimer);
+                hijackTimer = setTimeout(() => {
+                    self._scheduleHijack();
+                }, 10);
+            }
+            
+            // 调用原始回调
+            if (self._originalPreactCommit) {
+                self._originalPreactCommit(vnode, commitQueue);
+            }
+        };
+        
+        this._preactHijackerSetup = true;
+        console.log('MMP: Preact hijacker setup complete');
+    },
+
+    // ========== 清理 Preact 钩子 ==========
+    cleanupPreactHijacker() {
+        const preact = window.preact || window.Preact;
+        if (!preact || !preact.options) return;
+        
+        const options = preact.options;
+        
+        if (this._originalPreactDiffed !== null) {
+            options.diffed = this._originalPreactDiffed;
+            this._originalPreactDiffed = null;
+        }
+        
+        if (this._originalPreactCommit !== null) {
+            options.__c = this._originalPreactCommit;
+            this._originalPreactCommit = null;
+        }
+        
+        this._preactHijackerSetup = false;
+        if (this._hijackTimeoutId) {
+            clearTimeout(this._hijackTimeoutId);
+            this._hijackTimeoutId = null;
+        }
+    },
+
+    // ========== 调度劫持（防抖） ==========
+    _scheduleHijack() {
+        if (this._hijackTimeoutId) {
+            clearTimeout(this._hijackTimeoutId);
+        }
+        this._hijackTimeoutId = setTimeout(() => {
+            this._hijackTimeoutId = null;
+            this.hijackAllIcons();
+        }, 20);
+    },
+
+    // ========== 清理劫持标记 ==========
+    cleanupHijackedIcons() {
+        document.querySelectorAll('li.file[data-mmp-icon-hijacked="true"]').forEach(el => {
+            delete el.dataset.mmpIconHijacked;
+        });
+        console.log('MMP: 清理劫持标记');
+    },
+
+    // ========== 主动触发列表刷新（兜底） ==========
+    triggerListRefresh() {
+        // 方法1：通过 HFS API 刷新（如果存在）
+        if (HFS.refreshList && typeof HFS.refreshList === 'function') {
+            HFS.refreshList();
+            return;
+        }
+        
+        // 方法2：模拟点击刷新按钮
+        const refreshBtn = document.querySelector('.refresh-button, [data-refresh], .btn-refresh');
+        if (refreshBtn) {
+            refreshBtn.click();
+            return;
+        }
+        
+        // 方法3：触发 HFS 内部事件
+        if (HFS.emitEvent && typeof HFS.emitEvent === 'function') {
+            HFS.emitEvent('refreshRequest', {});
+            return;
+        }
+        
+        // 方法4：重新加载当前路径（最后手段）
+        if (window.location && window.location.pathname) {
+            const currentPath = window.location.pathname + window.location.search;
+            // 使用 history API 触发刷新
+            if (window.history && window.history.pushState) {
+                window.history.pushState({}, '', currentPath);
+                window.dispatchEvent(new PopStateEvent('popstate'));
+            }
+        }
+    },
+
+    async debugSimple(folderPath) {
+        console.log('=== SIMPLE DEBUG ===');
+        
+        let cleanPath = folderPath;
+        if (!cleanPath.startsWith('/')) {
+            cleanPath = '/' + cleanPath;
+        }
+        if (!cleanPath.endsWith('/')) {
+            cleanPath = cleanPath + '/';
+        }
+        
+        console.log('Clean path:', cleanPath);
+        console.log('Encoded:', encodeURIComponent(cleanPath));
+        
+        const apiUrl = `/~/api/get_file_list?uri=${encodeURIComponent(cleanPath)}`;
+        console.log('API URL:', apiUrl);
+        
+        try {
+            const response = await fetch(apiUrl);
+            console.log('Response status:', response.status);
+            
+            if (!response.ok) {
+                console.error('API returned:', response.status, response.statusText);
+                return { error: `HTTP ${response.status}` };
+            }
+            
+            const data = await response.json();
+            console.log('Response:', data);
+            
+            if (data && data.list) {
+                console.log(`\nFound ${data.list.length} items:`);
+                data.list.forEach(item => {
+                    const type = item.isFolder ? '[DIR]' : '[FILE]';
+                    const isAudio = this.audio_formats && this.audio_formats.test(item.n) ? ' [AUDIO]' : '';
+                    console.log(`  ${type} ${item.n}${isAudio}`);
+                });
+            }
+            
+            return data;
+        } catch (error) {
+            console.error('Fetch error:', error);
+            return { error: error.message };
+        }
+    },
+
+    async getRecursivePlaylist(folderUri) {
+        console.log('=== Recursive Scan Started ===');
+        console.log('Start URI:', folderUri);
+        
+        let allFiles = [];
+        const queue = [folderUri];
+        const processed = new Set();
+        
+        while (queue.length > 0) {
+            const currentUri = queue.shift();
+            
+            if (processed.has(currentUri)) continue;
+            processed.add(currentUri);
+            
+            try {
+                let scanUri = currentUri;
+                if (!scanUri.endsWith('/')) scanUri = scanUri + '/';
+                
+                const apiUrl = `${scanUri}?get=list&folders=*`;
+                console.log('Scanning:', apiUrl);
+                
+                const response = await fetch(apiUrl);
+                if (!response.ok) {
+                    console.warn(`Failed: ${response.status}`);
+                    continue;
                 }
-            }, 2000);
-        }
-        
-        this.originalPlaylistOrder = [...playlist];
-        
-        if (this.shuffleEnabled) {
-            for (let i = playlist.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [playlist[i], playlist[j]] = [playlist[j], playlist[i]];
-            }
-            this.playlist = playlist;
-            this.index = 0;
-            this.shuffledPlaylist = [...this.playlist];
-        } else {
-            this.playlist = playlist;
-            this.index = 0;
-        }
-        
-        this.currentFolder = folderUri;
-        
-        await this.play(this.playlist[this.index]);
-        
-    } catch (error) {
-        console.error('Error in playFolder:', error);
-        const title = root?.querySelector('.mmp-title');
-        if (title) {
-            title.textContent = `Error: ${error.message}`;
-            title.style.color = 'var(--bad)';
-        }
-    }
-},
-
-async init() {
-    const savedVol = localStorage.getItem('mmp_volume')
-    if (savedVol) {
-        this.cfg.audio_vol = parseFloat(savedVol)
-    }
-    
-    if (this.cfg.enable_cache) {
-        this.restoreCachedPlaylists()
-    }
-    
-    if (this.cfg.enable_cache) {
-        await this.initIndexedDB()
-    }
-    
-    this.initPlayerElement()
-    this.setupAudioBindings()
-    
-    if (window.HFS && HFS.onEvent) {
-        
-        // ========== 第一层拦截：entryIcon:after 清空 output ==========
-        // 阻止 hfs-click-icon-to-show 在图标上绑定 HFS.fileShow
-        if (cfg.auto_play) {
-            HFS.onEvent('entryIcon:after', ({ def, entry }, { output }) => {
-                if (!MMP.audio_formats.test(entry.uri)) return;
                 
-                // 保留其他插件（MVfiles-covers）的封面图标
-                const iconDef = output.find(Boolean) || def;
+                const text = await response.text();
+                const lines = text.split('\n').filter(line => line.trim());
                 
-                // 清空 output，阻止 hfs-click-icon-to-show 添加它的包裹
-                output.length = 0;
+                console.log(`Found ${lines.length} items`);
                 
-                // 返回带标记的图标，但不在这里绑定事件（交给 DOM 劫持）
-                return HFS.h('span', {
-                    class: 'mmp-audio-icon-target',
-                    'data-mmp-audio': 'true',
-                    style: 'cursor:pointer;display:inline-block;',
-                    title: 'Play with Musicplayer+'
-                }, iconDef);
-            });
-        }
-        
-        HFS.onEvent('configChanged', (newCfg) => {
-            this.cfg = { ...this.cfg, ...newCfg }
-            document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
-        })
-        
-        HFS.onEvent('afterList', () => {
-            if (this.isPlaying) {
-                document.getElementById('mmp-audio').style.display = 'flex'
-            }
-            if (cfg.auto_play) {
-                setTimeout(() => this.hijackAllIcons(), 200);
-            }
-        })
-
-        if (this.cfg.enable_cache) {
-            window.addEventListener('beforeunload', () => {
-                this.persistPlaylistData()
-            })
-        }
-
-        HFS.onEvent('remotePlay', ({ uri }) => {
-            this.handleRemotePlay(uri)
-        })
-
-        HFS.onEvent('remoteStop', () => {
-            this.handleRemoteStop()
-        })
-    }
-    
-    // ========== 第二层拦截：DOM 劫持（兜底） ==========
-    if (cfg.auto_play) {
-        this.startIconHijacker();
-    }
-},
-
-// ========== 图标劫持系统 ==========
-startIconHijacker() {
-    // 两次延时劫持即可覆盖绝大多数情况
-    setTimeout(() => this.hijackAllIcons(), 300);
-    setTimeout(() => this.hijackAllIcons(), 1000);
-    
-    const observer = new MutationObserver((mutations) => {
-        let shouldHijack = false;
-        for (const mutation of mutations) {
-            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                for (const node of mutation.addedNodes) {
-                    if (node.nodeType === 1) {
-                        if (node.querySelector && (
-                            node.querySelector('li.file') ||
-                            node.classList.contains('file') ||
-                            node.classList.contains('list-wrapper') ||
-                            node.querySelector('.icon')
-                        )) {
-                            shouldHijack = true;
-                            break;
+                for (const line of lines) {
+                    const url = line.trim();
+                    if (!url) continue;
+                    
+                    const fileName = decodeURIComponent(url.split('/').pop());
+                    
+                    if (url.endsWith('/')) {
+                        console.log(`  [DIR] Found folder: ${fileName}`);
+                        queue.push(url);
+                    } else {
+                        if (/\.(mp3|flac|wav|ogg|m4a|aac|opus|wma|aiff)$/i.test(fileName)) {
+                            console.log(`  [AUDIO] Found: ${fileName}`);
+                            allFiles.push({
+                                name: fileName,
+                                uri: url,
+                                size: 0
+                            });
                         }
                     }
                 }
+                
+                await new Promise(r => setTimeout(r, 200));
+                
+            } catch (error) {
+                console.error(`Error scanning ${currentUri}:`, error);
             }
-            if (shouldHijack) break;
         }
-        if (shouldHijack) {
-            setTimeout(() => this.hijackAllIcons(), 150);
-            // 二次兜底
-            setTimeout(() => this.hijackAllIcons(), 600);
+        
+        const unique = [];
+        const seen = new Set();
+        for (const file of allFiles) {
+            if (!seen.has(file.uri)) {
+                seen.add(file.uri);
+                unique.push(file);
+            }
         }
-    });
-    
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-},
+        
+        console.log(`\n=== Complete: Found ${unique.length} audio files ===`);
+        if (unique.length > 0) {
+            console.log('First 5 files:');
+            unique.slice(0, 5).forEach((f, i) => {
+                console.log(`  ${i+1}. ${f.name}`);
+            });
+        }
+        
+        return unique;
+    },
 
-hijackAllIcons() {
-    if (!cfg.auto_play) return;
-    
-    const fileItems = document.querySelectorAll('li.file');
-    
-    fileItems.forEach((li) => {
-        if (li.dataset.mmpIconHijacked === 'true') return;
+    async playFolder(entry) {
+        console.log('=== Play Folder ===');
+        console.log('Entry:', entry);
         
-        const a = li.querySelector('a[href]');
-        const name = a?.textContent?.trim();
-        if (!name || !this.audio_formats.test(name)) return;
+        let folderUri = entry.uri;
         
-        // 优先找我们标记的图标包裹，其次找普通图标
-        let icon = li.querySelector('.mmp-audio-icon-target');
-        if (!icon) {
-            icon = li.querySelector('span.icon, [class*="media-icon"]');
-            if (icon) {
-                // 找到父级包裹元素
-                if (icon.parentElement && icon.parentElement.tagName === 'SPAN' && 
-                    icon.parentElement !== li.querySelector('a') &&
-                    icon.parentElement.querySelector('span.icon, [class*="media-icon"]')) {
-                    icon = icon.parentElement;
+        if (folderUri && !folderUri.startsWith('/')) {
+            folderUri = '/' + folderUri;
+        }
+        
+        if (folderUri && !folderUri.endsWith('/')) {
+            folderUri = folderUri + '/';
+        }
+        
+        console.log('Final folder URI:', folderUri);
+        console.log('Folder name:', entry.name);
+        
+        const root = document.getElementById('mmp-audio');
+        if (root) {
+            root.style.display = 'flex';
+            const title = root.querySelector('.mmp-title');
+            if (title) {
+                title.textContent = `Scanning: ${entry.name || 'folder'}...`;
+            }
+        }
+        
+        try {
+            const testUrl = `/~/api/get_file_list?uri=${encodeURIComponent(folderUri)}`;
+            console.log('Test API:', testUrl);
+            
+            const testResponse = await fetch(testUrl);
+            if (!testResponse.ok) {
+                throw new Error(`Cannot access folder: HTTP ${testResponse.status}`);
+            }
+            
+            const playlist = await this.getRecursivePlaylist(folderUri);
+            
+            console.log(`Scan complete! Found ${playlist.length} audio files`);
+            
+            if (playlist.length === 0) {
+                const title = root?.querySelector('.mmp-title');
+                if (title) {
+                    title.textContent = `No audio files in "${entry.name}"`;
+                    title.style.color = 'var(--bad)';
+                }
+                console.error('No audio files found!');
+                return;
+            }
+            
+            const title = root?.querySelector('.mmp-title');
+            if (title) {
+                title.textContent = `${playlist.length} songs - ${entry.name}`;
+                title.style.color = '';
+                setTimeout(() => {
+                    if (title && title.textContent && title.textContent.includes('songs -')) {
+                        title.textContent = playlist[0].name.replace(/\.[^.]+$/, '');
+                    }
+                }, 2000);
+            }
+            
+            this.originalPlaylistOrder = [...playlist];
+            
+            if (this.shuffleEnabled) {
+                for (let i = playlist.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [playlist[i], playlist[j]] = [playlist[j], playlist[i]];
+                }
+                this.playlist = playlist;
+                this.index = 0;
+                this.shuffledPlaylist = [...this.playlist];
+            } else {
+                this.playlist = playlist;
+                this.index = 0;
+            }
+            
+            this.currentFolder = folderUri;
+            
+            await this.play(this.playlist[this.index]);
+            
+        } catch (error) {
+            console.error('Error in playFolder:', error);
+            const title = root?.querySelector('.mmp-title');
+            if (title) {
+                title.textContent = `Error: ${error.message}`;
+                title.style.color = 'var(--bad)';
+            }
+        }
+    },
+
+    async init() {
+        const savedVol = localStorage.getItem('mmp_volume')
+        if (savedVol) {
+            this.cfg.audio_vol = parseFloat(savedVol)
+        }
+        
+        if (this.cfg.enable_cache) {
+            this.restoreCachedPlaylists()
+        }
+        
+        if (this.cfg.enable_cache) {
+            await this.initIndexedDB()
+        }
+        
+        this.initPlayerElement()
+        this.setupAudioBindings()
+        
+        if (window.HFS && HFS.onEvent) {
+            
+            // ========== 第一层拦截：entryIcon:after 清空 output ==========
+            // 阻止 hfs-click-icon-to-show 在图标上绑定 HFS.fileShow
+            if (cfg.auto_play) {
+                HFS.onEvent('entryIcon:after', ({ def, entry }, { output }) => {
+                    if (!MMP.audio_formats.test(entry.uri)) return;
+                    
+                    // 保留其他插件（MVfiles-covers）的封面图标
+                    const iconDef = output.find(Boolean) || def;
+                    
+                    // 清空 output，阻止 hfs-click-icon-to-show 添加它的包裹
+                    output.length = 0;
+                    
+                    // 返回带标记的图标，但不在这里绑定事件（交给 DOM 劫持）
+                    return HFS.h('span', {
+                        class: 'mmp-audio-icon-target',
+                        'data-mmp-audio': 'true',
+                        style: 'cursor:pointer;display:inline-block;',
+                        title: 'Play with Musicplayer+'
+                    }, iconDef);
+                });
+            }
+            
+            HFS.onEvent('configChanged', (newCfg) => {
+                this.cfg = { ...this.cfg, ...newCfg }
+                document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
+            })
+            
+            // ========== 修改：afterList 事件 - 增强劫持 ==========
+            HFS.onEvent('afterList', () => {
+                if (this.isPlaying) {
+                    document.getElementById('mmp-audio').style.display = 'flex'
+                }
+                
+                if (cfg.auto_play) {
+                    // 立即尝试劫持
+                    this.hijackAllIcons();
+                    
+                    // 延迟多次重试，覆盖不同渲染阶段
+                    [50, 150, 350, 700, 1200].forEach(delay => {
+                        setTimeout(() => {
+                            // 检查是否有未劫持的音频文件
+                            const unHijacked = document.querySelectorAll('li.file:not([data-mmp-icon-hijacked="true"])');
+                            let hasAudio = false;
+                            for (const li of unHijacked) {
+                                const a = li.querySelector('a[href]');
+                                const name = a?.textContent?.trim();
+                                if (name && this.audio_formats.test(name)) {
+                                    hasAudio = true;
+                                    break;
+                                }
+                            }
+                            if (hasAudio) {
+                                this.hijackAllIcons();
+                            }
+                        }, delay);
+                    });
+                    
+                    // 兜底检查：如果还有未劫持的音频文件，尝试刷新列表
+                    setTimeout(() => {
+                        const unHijacked = document.querySelectorAll('li.file:not([data-mmp-icon-hijacked="true"])');
+                        let hasUnhijackedAudio = false;
+                        for (const li of unHijacked) {
+                            const a = li.querySelector('a[href]');
+                            const name = a?.textContent?.trim();
+                            if (name && this.audio_formats.test(name)) {
+                                hasUnhijackedAudio = true;
+                                break;
+                            }
+                        }
+                        
+                        if (hasUnhijackedAudio) {
+                            console.log('MMP: 发现未劫持的音频文件，尝试刷新列表');
+                            // 先尝试 Preact 钩子再次劫持
+                            this._scheduleHijack();
+                            // 如果还是不行，触发列表刷新
+                            setTimeout(() => {
+                                const stillUnhijacked = document.querySelectorAll('li.file:not([data-mmp-icon-hijacked="true"])');
+                                let stillHasAudio = false;
+                                for (const li of stillUnhijacked) {
+                                    const a = li.querySelector('a[href]');
+                                    const name = a?.textContent?.trim();
+                                    if (name && this.audio_formats.test(name)) {
+                                        stillHasAudio = true;
+                                        break;
+                                    }
+                                }
+                                if (stillHasAudio) {
+                                    console.log('MMP: 劫持仍然失败，触发列表刷新');
+                                    this.triggerListRefresh();
+                                }
+                            }, 500);
+                        }
+                    }, 1500);
+                }
+            })
+
+            if (this.cfg.enable_cache) {
+                window.addEventListener('beforeunload', () => {
+                    this.persistPlaylistData()
+                })
+            }
+
+            HFS.onEvent('remotePlay', ({ uri }) => {
+                this.handleRemotePlay(uri)
+            })
+
+            HFS.onEvent('remoteStop', () => {
+                this.handleRemoteStop()
+            })
+        }
+        
+        // ========== 第二层拦截：DOM 劫持（兜底） ==========
+        if (cfg.auto_play) {
+            this.startIconHijacker();
+        }
+        
+        // ========== 第三层拦截：Preact 钩子（最可靠） ==========
+        if (cfg.auto_play) {
+            // 延迟一点设置 Preact 钩子，确保 Preact 已加载
+            setTimeout(() => {
+                this.setupPreactHijacker();
+            }, 50);
+        }
+        
+        // ========== 第四层拦截：全局点击兜底 ==========
+        if (cfg.auto_play) {
+            this.setupGlobalClickInterceptor();
+        }
+    },
+
+    // ========== 全局点击拦截（最后防线） ==========
+    setupGlobalClickInterceptor() {
+        if (this._globalInterceptorSetup) return;
+        this._globalInterceptorSetup = true;
+        
+        const self = this;
+        document.addEventListener('click', function(e) {
+            const target = e.target.closest('li.file');
+            if (!target) return;
+            
+            // 如果已经被劫持，跳过
+            if (target.dataset.mmpIconHijacked === 'true') return;
+            
+            const a = target.querySelector('a[href]');
+            if (!a) return;
+            
+            const name = a.textContent?.trim();
+            if (!name || !self.audio_formats.test(name)) return;
+            
+            // 检查点击的是否是图标区域
+            const icon = target.querySelector('span.icon, [class*="media-icon"]');
+            if (!icon || !icon.contains(e.target)) return;
+            
+            // 拦截
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            e.stopPropagation();
+            
+            const entry = self.findEntryByName(name) || { 
+                name, 
+                uri: a.href,
+                ext: name.split('.').pop().toLowerCase()
+            };
+            self.audio(entry);
+            target.dataset.mmpIconHijacked = 'true';
+            console.log('MMP: 通过全局拦截捕获点击:', name);
+        }, true); // 捕获阶段
+        console.log('MMP: 全局点击拦截器已设置');
+    },
+
+    // ========== 图标劫持系统 ==========
+    startIconHijacker() {
+        if (!cfg.auto_play) return;
+        
+        // 多次延时劫持，覆盖不同渲染阶段
+        [200, 500, 1000, 2000, 3000].forEach(delay => {
+            setTimeout(() => this.hijackAllIcons(), delay);
+        });
+        
+        const self = this;
+        let debounceTimer = null;
+        
+        const observer = new MutationObserver((mutations) => {
+            let shouldHijack = false;
+            for (const mutation of mutations) {
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    for (const node of mutation.addedNodes) {
+                        if (node.nodeType === 1) {
+                            if (node.querySelector && (
+                                node.querySelector('li.file') ||
+                                node.classList.contains('file') ||
+                                node.classList.contains('list-wrapper') ||
+                                node.querySelector('.icon')
+                            )) {
+                                shouldHijack = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (shouldHijack) break;
+            }
+            if (shouldHijack) {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => {
+                    // 检查是否有音频文件
+                    if (self.checkAudioInCurrentList()) {
+                        self.hijackAllIcons();
+                        // 二次确认
+                        setTimeout(() => {
+                            const unHijacked = document.querySelectorAll('li.file:not([data-mmp-icon-hijacked="true"])');
+                            for (const li of unHijacked) {
+                                const a = li.querySelector('a[href]');
+                                const name = a?.textContent?.trim();
+                                if (name && self.audio_formats.test(name)) {
+                                    self.hijackAllIcons();
+                                    break;
+                                }
+                            }
+                        }, 100);
+                    }
+                }, 100);
+            }
+        });
+        
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+        
+        // 保存 observer 以便清理
+        this._hijackObserver = observer;
+    },
+
+    hijackAllIcons() {
+        if (!cfg.auto_play) return;
+        
+        // 快速检查是否有音频文件
+        if (!this.checkAudioInCurrentList()) {
+            return;
+        }
+        
+        const fileItems = document.querySelectorAll('li.file:not([data-mmp-icon-hijacked="true"])');
+        if (fileItems.length === 0) return;
+        
+        let hijackedCount = 0;
+        let audioCount = 0;
+        
+        fileItems.forEach((li) => {
+            const a = li.querySelector('a[href]');
+            const name = a?.textContent?.trim();
+            if (!name || !this.audio_formats.test(name)) return;
+            
+            audioCount++;
+            
+            // 优先找我们标记的图标包裹，其次找普通图标
+            let icon = li.querySelector('.mmp-audio-icon-target');
+            if (!icon) {
+                icon = li.querySelector('span.icon, [class*="media-icon"]');
+                if (icon) {
+                    // 找到父级包裹元素
+                    if (icon.parentElement && icon.parentElement.tagName === 'SPAN' && 
+                        icon.parentElement !== li.querySelector('a') &&
+                        icon.parentElement.querySelector('span.icon, [class*="media-icon"]')) {
+                        icon = icon.parentElement;
+                    }
                 }
             }
+            if (!icon) return;
+            
+            li.dataset.mmpIconHijacked = 'true';
+            hijackedCount++;
+            
+            const entry = this.findEntryByName(name) || { 
+                name, 
+                uri: a.href,
+                ext: name.split('.').pop().toLowerCase()
+            };
+            
+            icon.style.cursor = 'pointer';
+            icon.title = 'Play with Musicplayer+';
+            
+            this.hijackElementClicks(icon, entry);
+        });
+        
+        if (audioCount > 0 && hijackedCount > 0) {
+            console.log(`MMP: 劫持 ${hijackedCount}/${audioCount} 个音频图标`);
         }
-        if (!icon) return;
-        
-        li.dataset.mmpIconHijacked = 'true';
-        
-        const entry = this.findEntryByName(name) || { 
-            name, 
-            uri: a.href,
-            ext: name.split('.').pop().toLowerCase()
-        };
-        
-        icon.style.cursor = 'pointer';
-        icon.title = 'Play with Musicplayer+';
-        
-        this.hijackElementClicks(icon, entry);
-    });
-},
+    },
 
-hijackElementClicks(element, entry) {
-    if (!element || this.hijackedIcons.has(element)) return;
-    
-    this.hijackedIcons.add(element);
-    
-    // 捕获阶段拦截，优先级最高
-    element.addEventListener('click', (e) => {
-        e.stopImmediatePropagation();
-        e.stopPropagation();
-        e.preventDefault();
-        this.audio(entry);
-    }, true);
-    
-    // 冒泡阶段也拦截，双重保险
-    element.addEventListener('click', (e) => {
-        e.stopImmediatePropagation();
-        e.stopPropagation();
-        e.preventDefault();
-        this.audio(entry);
-    }, false);
-},
+    hijackElementClicks(element, entry) {
+        if (!element || this.hijackedIcons.has(element)) return;
+        
+        this.hijackedIcons.add(element);
+        
+        // 捕获阶段拦截，优先级最高
+        element.addEventListener('click', (e) => {
+            e.stopImmediatePropagation();
+            e.stopPropagation();
+            e.preventDefault();
+            this.audio(entry);
+        }, true);
+        
+        // 冒泡阶段也拦截，双重保险
+        element.addEventListener('click', (e) => {
+            e.stopImmediatePropagation();
+            e.stopPropagation();
+            e.preventDefault();
+            this.audio(entry);
+        }, false);
+    },
 
     // 显示当前播放文件的 fileMenu
     async showFileMenuForCurrentSong() {
@@ -1286,49 +1624,49 @@ hijackElementClicks(element, entry) {
         this.isDragging = false
     },
 
-async audio(entry) {
-    if (this.isRemoteControlled) return
+    async audio(entry) {
+        if (this.isRemoteControlled) return
 
-    const folderUri = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/'
+        const folderUri = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/'
 
-    if (this.playlist.length && this.currentFolder === folderUri) {
-        const idx = this.playlist.findIndex(f =>
-            f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
-        )
-        if (idx >= 0) {
-            this.index = idx
-            return this.play(this.playlist[this.index])
+        if (this.playlist.length && this.currentFolder === folderUri) {
+            const idx = this.playlist.findIndex(f =>
+                f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
+            )
+            if (idx >= 0) {
+                this.index = idx
+                return this.play(this.playlist[this.index])
+            }
         }
-    }
 
-    const playlist = await this.getPlaylist(folderUri)
-    
-    this.originalPlaylistOrder = [...playlist];
-    
-    if (this.shuffleEnabled) {
-        const currentSong = playlist.find(f => 
-            f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
-        );
-        const otherSongs = playlist.filter(f => f !== currentSong);
-        for (let i = otherSongs.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [otherSongs[i], otherSongs[j]] = [otherSongs[j], otherSongs[i]];
+        const playlist = await this.getPlaylist(folderUri)
+        
+        this.originalPlaylistOrder = [...playlist];
+        
+        if (this.shuffleEnabled) {
+            const currentSong = playlist.find(f => 
+                f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
+            );
+            const otherSongs = playlist.filter(f => f !== currentSong);
+            for (let i = otherSongs.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [otherSongs[i], otherSongs[j]] = [otherSongs[j], otherSongs[i]];
+            }
+            this.playlist = currentSong ? [currentSong, ...otherSongs] : [...otherSongs];
+            this.index = 0;
+            this.shuffledPlaylist = [...this.playlist];
+        } else {
+            this.playlist = playlist;
+            const idx = this.playlist.findIndex(f =>
+                f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
+            )
+            this.index = idx >= 0 ? idx : 0
         }
-        this.playlist = currentSong ? [currentSong, ...otherSongs] : [...otherSongs];
-        this.index = 0;
-        this.shuffledPlaylist = [...this.playlist];
-    } else {
-        this.playlist = playlist;
-        const idx = this.playlist.findIndex(f =>
-            f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
-        )
-        this.index = idx >= 0 ? idx : 0
-    }
-    
-    this.currentFolder = folderUri
-    
-    this.play(this.playlist[this.index])
-},
+        
+        this.currentFolder = folderUri
+        
+        this.play(this.playlist[this.index])
+    },
 
     async play(entry) {
         const root = document.getElementById('mmp-audio')
@@ -2069,44 +2407,63 @@ async audio(entry) {
         if (volDisplay) volDisplay.textContent = `${Math.round(newVol * 100)}%`;
     },
 
-stop() {
-    const root = document.getElementById('mmp-audio');
-    if (!root) return;
+    stop() {
+        const root = document.getElementById('mmp-audio');
+        if (!root) return;
 
-    const title = root.querySelector('.mmp-title');
-    if (title && title.textContent && title.textContent.includes('Scanning')) {
-        console.log('Preventing stop() during scanning');
-        return;
-    }
+        const title = root.querySelector('.mmp-title');
+        if (title && title.textContent && title.textContent.includes('Scanning')) {
+            console.log('Preventing stop() during scanning');
+            return;
+        }
 
-    if (this.cacheProbeInterval) {
-        clearInterval(this.cacheProbeInterval);
-        this.cacheProbeInterval = null;
-    }
+        if (this.cacheProbeInterval) {
+            clearInterval(this.cacheProbeInterval);
+            this.cacheProbeInterval = null;
+        }
 
-    const audio = this.audioElement;
-    const bitrateDisplay = root.querySelector('.mmp-bitrate');
+        const audio = this.audioElement;
+        const bitrateDisplay = root.querySelector('.mmp-bitrate');
 
-    root.style.display = 'none';
-    if (audio) {
-        audio.pause();
-        audio.src = '';
+        root.style.display = 'none';
+        if (audio) {
+            audio.pause();
+            audio.src = '';
+        }
+        if (title) {
+            title.innerText = '';
+            title.style.color = '';
+        }
+        if (bitrateDisplay) {
+            bitrateDisplay.textContent = '';
+        }
+        this.isPlaying = false;
+        this.isDragging = false;
+        this.ffmpegAttempted = false;
+        this.isTranscoded = false;
+        this.loadedFromCache = false;
+        this.currentPlayingUri = '';
+        this.currentPlayingName = '';
+    },
+
+    // ========== 清理资源 ==========
+    dispose() {
+        this.cleanupPreactHijacker();
+        if (this._hijackObserver) {
+            this._hijackObserver.disconnect();
+            this._hijackObserver = null;
+        }
+        if (this._hijackTimeoutId) {
+            clearTimeout(this._hijackTimeoutId);
+            this._hijackTimeoutId = null;
+        }
+        console.log('MMP: Resources cleaned up');
     }
-    if (title) {
-        title.innerText = '';
-        title.style.color = '';
-    }
-    if (bitrateDisplay) {
-        bitrateDisplay.textContent = '';
-    }
-    this.isPlaying = false;
-    this.isDragging = false;
-    this.ffmpegAttempted = false;
-    this.isTranscoded = false;
-    this.loadedFromCache = false;
-    this.currentPlayingUri = '';
-    this.currentPlayingName = '';
-}
 }
 
 MMP.init();
+
+// 页面卸载时清理资源
+window.addEventListener('beforeunload', () => {
+    MMP.dispose();
+});
