@@ -167,13 +167,10 @@ const MMP = {
         // 获取 Preact 实例
         const preact = window.preact || window.Preact;
         if (!preact || !preact.options) {
-            // 使用控制台输出（已恢复）
-            console.log('MMP: Preact not found, skipping Preact hijacker');
             return;
         }
         
         const options = preact.options;
-        console.log('MMP: Setting up Preact hijacker');
         
         // 保存原始回调
         this._originalPreactDiffed = options.diffed;
@@ -214,7 +211,6 @@ const MMP = {
         };
         
         this._preactHijackerSetup = true;
-        console.log('MMP: Preact hijacker setup complete');
     },
 
     // ========== 清理 Preact 钩子 ==========
@@ -257,7 +253,6 @@ const MMP = {
         document.querySelectorAll('li.file[data-mmp-icon-hijacked="true"]').forEach(el => {
             delete el.dataset.mmpIconHijacked;
         });
-        console.log('MMP: 清理劫持标记');
     },
 
     // ========== 主动触发列表刷新（兜底） ==========
@@ -293,8 +288,6 @@ const MMP = {
     },
 
     async debugSimple(folderPath) {
-        console.log('=== SIMPLE DEBUG ===');
-        
         let cleanPath = folderPath;
         if (!cleanPath.startsWith('/')) {
             cleanPath = '/' + cleanPath;
@@ -303,44 +296,31 @@ const MMP = {
             cleanPath = cleanPath + '/';
         }
         
-        console.log('Clean path:', cleanPath);
-        console.log('Encoded:', encodeURIComponent(cleanPath));
-        
         const apiUrl = `/~/api/get_file_list?uri=${encodeURIComponent(cleanPath)}`;
-        console.log('API URL:', apiUrl);
         
         try {
             const response = await fetch(apiUrl);
-            console.log('Response status:', response.status);
             
             if (!response.ok) {
-                console.error('API returned:', response.status, response.statusText);
                 return { error: `HTTP ${response.status}` };
             }
             
             const data = await response.json();
-            console.log('Response:', data);
             
             if (data && data.list) {
-                console.log(`\nFound ${data.list.length} items:`);
                 data.list.forEach(item => {
-                    const type = item.isFolder ? '[DIR]' : '[FILE]';
-                    const isAudio = this.audio_formats && this.audio_formats.test(item.n) ? ' [AUDIO]' : '';
-                    console.log(`  ${type} ${item.n}${isAudio}`);
+                    const isAudio = this.audio_formats && this.audio_formats.test(item.n);
+                    // 仅用于调试，保留但不输出
                 });
             }
             
             return data;
         } catch (error) {
-            console.error('Fetch error:', error);
             return { error: error.message };
         }
     },
 
     async getRecursivePlaylist(folderUri) {
-        console.log('=== Recursive Scan Started ===');
-        console.log('Start URI:', folderUri);
-        
         let allFiles = [];
         const queue = [folderUri];
         const processed = new Set();
@@ -356,18 +336,14 @@ const MMP = {
                 if (!scanUri.endsWith('/')) scanUri = scanUri + '/';
                 
                 const apiUrl = `${scanUri}?get=list&folders=*`;
-                console.log('Scanning:', apiUrl);
                 
                 const response = await fetch(apiUrl);
                 if (!response.ok) {
-                    console.warn(`Failed: ${response.status}`);
                     continue;
                 }
                 
                 const text = await response.text();
                 const lines = text.split('\n').filter(line => line.trim());
-                
-                console.log(`Found ${lines.length} items`);
                 
                 for (const line of lines) {
                     const url = line.trim();
@@ -376,11 +352,9 @@ const MMP = {
                     const fileName = decodeURIComponent(url.split('/').pop());
                     
                     if (url.endsWith('/')) {
-                        console.log(`  [DIR] Found folder: ${fileName}`);
                         queue.push(url);
                     } else {
                         if (/\.(mp3|flac|wav|ogg|m4a|aac|opus|wma|aiff)$/i.test(fileName)) {
-                            console.log(`  [AUDIO] Found: ${fileName}`);
                             allFiles.push({
                                 name: fileName,
                                 uri: url,
@@ -393,7 +367,7 @@ const MMP = {
                 await new Promise(r => setTimeout(r, 200));
                 
             } catch (error) {
-                console.error(`Error scanning ${currentUri}:`, error);
+                // 静默处理错误
             }
         }
         
@@ -406,21 +380,10 @@ const MMP = {
             }
         }
         
-        console.log(`\n=== Complete: Found ${unique.length} audio files ===`);
-        if (unique.length > 0) {
-            console.log('First 5 files:');
-            unique.slice(0, 5).forEach((f, i) => {
-                console.log(`  ${i+1}. ${f.name}`);
-            });
-        }
-        
         return unique;
     },
 
     async playFolder(entry) {
-        console.log('=== Play Folder ===');
-        console.log('Entry:', entry);
-        
         let folderUri = entry.uri;
         
         if (folderUri && !folderUri.startsWith('/')) {
@@ -430,9 +393,6 @@ const MMP = {
         if (folderUri && !folderUri.endsWith('/')) {
             folderUri = folderUri + '/';
         }
-        
-        console.log('Final folder URI:', folderUri);
-        console.log('Folder name:', entry.name);
         
         const root = document.getElementById('mmp-audio');
         if (root) {
@@ -445,7 +405,6 @@ const MMP = {
         
         try {
             const testUrl = `/~/api/get_file_list?uri=${encodeURIComponent(folderUri)}`;
-            console.log('Test API:', testUrl);
             
             const testResponse = await fetch(testUrl);
             if (!testResponse.ok) {
@@ -454,15 +413,12 @@ const MMP = {
             
             const playlist = await this.getRecursivePlaylist(folderUri);
             
-            console.log(`Scan complete! Found ${playlist.length} audio files`);
-            
             if (playlist.length === 0) {
                 const title = root?.querySelector('.mmp-title');
                 if (title) {
                     title.textContent = `No audio files in "${entry.name}"`;
                     title.style.color = 'var(--bad)';
                 }
-                console.error('No audio files found!');
                 return;
             }
             
@@ -497,7 +453,6 @@ const MMP = {
             await this.play(this.playlist[this.index]);
             
         } catch (error) {
-            console.error('Error in playFolder:', error);
             const title = root?.querySelector('.mmp-title');
             if (title) {
                 title.textContent = `Error: ${error.message}`;
@@ -596,7 +551,6 @@ const MMP = {
                         }
                         
                         if (hasUnhijackedAudio) {
-                            console.log('MMP: 发现未劫持的音频文件，尝试刷新列表');
                             // 先尝试 Preact 钩子再次劫持
                             this._scheduleHijack();
                             // 如果还是不行，触发列表刷新
@@ -612,7 +566,6 @@ const MMP = {
                                     }
                                 }
                                 if (stillHasAudio) {
-                                    console.log('MMP: 劫持仍然失败，触发列表刷新');
                                     this.triggerListRefresh();
                                 }
                             }, 500);
@@ -690,9 +643,7 @@ const MMP = {
             };
             self.audio(entry);
             target.dataset.mmpIconHijacked = 'true';
-            console.log('MMP: 通过全局拦截捕获点击:', name);
         }, true); // 捕获阶段
-        console.log('MMP: 全局点击拦截器已设置');
     },
 
     // ========== 图标劫持系统 ==========
@@ -809,10 +760,6 @@ const MMP = {
             
             this.hijackElementClicks(icon, entry);
         });
-        
-        if (audioCount > 0 && hijackedCount > 0) {
-            console.log(`MMP: 劫持 ${hijackedCount}/${audioCount} 个音频图标`);
-        }
     },
 
     hijackElementClicks(element, entry) {
@@ -840,7 +787,6 @@ const MMP = {
     // 显示当前播放文件的 fileMenu
     async showFileMenuForCurrentSong() {
         if (!this.currentPlayingUri) {
-            console.log('No song currently playing');
             return;
         }
         
@@ -873,7 +819,6 @@ const MMP = {
                 this.showSimpleFileMenu(entry);
             }
         } catch (error) {
-            console.error('Failed to show file menu:', error);
             this.showSimpleFileMenu({ uri: this.currentPlayingUri, name: this.currentPlayingName });
         }
     },
@@ -957,7 +902,6 @@ const MMP = {
             
             return menu;
         } catch (e) {
-            console.error('Error creating file menu:', e);
             return null;
         }
     },
@@ -1142,8 +1086,6 @@ const MMP = {
                 }
             }
         }
-        
-        console.log(`Shuffle ${this.shuffleEnabled ? 'enabled' : 'disabled'}`);
     },
 
     getNextShuffleIndex() {
@@ -1164,7 +1106,6 @@ const MMP = {
             const request = indexedDB.open(this.dbName, this.dbVersion)
             
             request.onerror = () => {
-                console.warn('Failed to open IndexedDB for audio cache')
                 this.isDbInitialized = false
                 reject(request.error)
             }
@@ -1172,7 +1113,6 @@ const MMP = {
             request.onsuccess = () => {
                 this.db = request.result
                 this.isDbInitialized = true
-                console.log('IndexedDB for audio cache initialized')
                 resolve()
             }
             
@@ -1210,7 +1150,6 @@ const MMP = {
             }
             
             request.onerror = () => {
-                console.warn('Error reading from audio cache:', request.error)
                 resolve(null)
             }
         })
@@ -1238,7 +1177,6 @@ const MMP = {
             }
             
             request.onerror = () => {
-                console.warn('Error storing audio in cache:', request.error)
                 resolve(false)
             }
         })
@@ -1300,7 +1238,7 @@ const MMP = {
                 return blobUrl
             }
         } catch (e) {
-            console.warn('Failed to cache audio:', e)
+            // 静默处理缓存失败
         }
         
         return null
@@ -1320,7 +1258,7 @@ const MMP = {
             }
             localStorage.setItem(this.storageKey, JSON.stringify(dataToSave))
         } catch (e) {
-            console.warn('Failed to persist playlist data:', e)
+            // 静默处理持久化失败
         }
     },
 
@@ -1340,7 +1278,7 @@ const MMP = {
                 }
             }
         } catch (e) {
-            console.warn('Failed to restore cached playlists:', e)
+            // 静默处理恢复失败
         }
     },
 
@@ -1372,7 +1310,6 @@ const MMP = {
                     uri: folderUri + encodeURIComponent(f.n)
                 }))
         } catch (e) {
-            console.error('Failed to fetch playlist:', e)
             return []
         }
     },
@@ -1711,7 +1648,6 @@ const MMP = {
             if (bitrateDisplay && this.cfg.show_bitrate) {
                 bitrateDisplay.textContent = this.formatBitrateWithUnits(cachedBitrate)
             }
-            console.log('Bitrate from cache:', entry.name, '->', cachedBitrate, 'bps')
         } else {
             this.currentBitrate = 0
             if (bitrateDisplay) {
@@ -1731,7 +1667,6 @@ const MMP = {
                 audio.src = cachedAudioUrl
                 this.isTranscoded = false
                 this.loadedFromCache = true
-                console.log('Using cached audio:', entry.name)
                 
                 if (this.currentBitrate === 0) {
                     setTimeout(() => {
@@ -1777,7 +1712,6 @@ const MMP = {
                             const cachedUrl = await this.cacheAudio(entry.uri, arrayBuffer, contentType)
                             if (cachedUrl) {
                                 audio.src = cachedUrl
-                                console.log('Audio cached:', entry.name)
                             } else {
                                 audio.src = entry.uri
                             }
@@ -1907,28 +1841,20 @@ const MMP = {
 
     async getBitrateFromFfmpeg(uri) {
         try {
-            console.log('Attempting to get bitrate from FFmpeg for:', uri);
-            
             const testAudio = new Audio();
             testAudio.src = uri + "?ffmpeg&probe";
             
             testAudio.addEventListener('loadedmetadata', () => {
-                console.log('FFmpeg metadata loaded for:', uri);
-                
                 if (testAudio.duration && testAudio.duration > 0) {
                     this.fetchFileSizeAndCalculateBitrate(uri, testAudio.duration);
                 }
             });
             
-            testAudio.addEventListener('error', (e) => {
-                console.warn('Error loading FFmpeg probe:', e);
-            });
+            testAudio.addEventListener('error', () => {});
             
             testAudio.load();
             
-        } catch (e) {
-            console.warn('Failed to get bitrate from FFmpeg:', e);
-        }
+        } catch (e) {}
     },
 
     async fetchFileSizeAndCalculateBitrate(uri, duration) {
@@ -1940,8 +1866,6 @@ const MMP = {
                 const fileSize = parseInt(contentLength);
                 const bitrate = Math.round((fileSize * 8) / duration);
                 
-                console.log('Calculated bitrate from file size:', fileSize, 'bytes, duration:', duration, 'seconds, bitrate:', bitrate, 'bps');
-                
                 if (bitrate > 0) {
                     this.currentBitrate = bitrate;
                     this.bitrateCache.set(uri, bitrate);
@@ -1952,44 +1876,26 @@ const MMP = {
                     }
                 }
             }
-        } catch (e) {
-            console.warn('Failed to fetch file size:', e);
-        }
+        } catch (e) {}
     },
 
     tryParseBitrateFromFile(entry, arrayBuffer, contentType) {
         try {
-            console.log('Attempting to parse bitrate from file:', entry.name);
-            
             const ext = entry.name.split('.').pop().toLowerCase();
             
             switch(ext) {
                 case 'mp3':
                     this.parseMp3Bitrate(arrayBuffer, entry);
                     break;
-                case 'flac':
-                case 'wav':
-                case 'aac':
-                case 'm4a':
-                case 'ogg':
-                case 'opus':
-                    console.log('Bitrate calculation for', ext, 'will be done from file size/duration');
-                    break;
                 default:
-                    console.log('No specific parser for', ext, 'extension');
+                    // 其他格式不处理
             }
-            
-        } catch (e) {
-            console.warn('Failed to parse bitrate from file:', e);
-        }
+        } catch (e) {}
     },
 
     parseMp3Bitrate(arrayBuffer, entry) {
         try {
-            console.log('Parsing MP3 bitrate from file header');
-            
             if (arrayBuffer.byteLength < 100) {
-                console.log('File too small to parse MP3 header');
                 return;
             }
             
@@ -1999,8 +1905,6 @@ const MMP = {
                 const header = view.getUint32(i);
                 
                 if ((header & 0xFFE00000) === 0xFFE00000) {
-                    console.log('Found MP3 frame header at position', i);
-                    
                     const bitrateIndex = (header >> 12) & 0x0F;
                     
                     const mpeg1Layer3Bitrates = [
@@ -2012,7 +1916,6 @@ const MMP = {
                         const bitrateKbps = mpeg1Layer3Bitrates[bitrateIndex];
                         if (bitrateKbps > 0) {
                             const bitrateBps = bitrateKbps * 1000;
-                            console.log('MP3 bitrate from header:', bitrateKbps, 'kbps');
                             
                             this.currentBitrate = bitrateBps;
                             this.bitrateCache.set(entry.uri, bitrateBps);
@@ -2028,11 +1931,7 @@ const MMP = {
                     break;
                 }
             }
-            
-            console.log('Could not parse MP3 bitrate from header');
-        } catch (e) {
-            console.warn('Failed to parse MP3 bitrate:', e);
-        }
+        } catch (e) {}
     },
 
     calculateAndCacheBitrate(audio, entry) {
@@ -2047,7 +1946,6 @@ const MMP = {
             if (bitrateDisplay && this.cfg.show_bitrate) {
                 bitrateDisplay.textContent = this.formatBitrateWithUnits(bitrate);
             }
-            console.log('Calculated bitrate from audio:', entry.name, '->', bitrate, 'bps');
         }
     },
 
@@ -2055,7 +1953,6 @@ const MMP = {
         try {
             const cachedBitrate = this.bitrateCache.get(entry.uri);
             if (cachedBitrate) {
-                console.log('Returning cached bitrate:', cachedBitrate, 'bps');
                 return cachedBitrate;
             }
             
@@ -2083,11 +1980,9 @@ const MMP = {
             };
             
             const defaultBitrate = defaultBitrates[ext] || 128000;
-            console.log('Using default bitrate for', ext, ':', defaultBitrate, 'bps');
             return defaultBitrate;
             
         } catch (e) {
-            console.warn('Failed to calculate bitrate from audio:', e);
             return 0;
         }
     },
@@ -2101,8 +1996,6 @@ const MMP = {
                 const fileSize = parseInt(contentLength);
                 const bitrate = Math.round((fileSize * 8) / duration);
                 
-                console.log('Calculated bitrate from file size:', fileSize, 'bytes, duration:', duration, 'seconds, bitrate:', bitrate, 'bps');
-                
                 if (bitrate > 0) {
                     this.currentBitrate = bitrate;
                     this.bitrateCache.set(uri, bitrate);
@@ -2113,9 +2006,7 @@ const MMP = {
                     }
                 }
             }
-        } catch (e) {
-            console.warn('Failed to fetch file size:', e);
-        }
+        } catch (e) {}
     },
 
     async ensureAudioPlayable(audio) {
@@ -2413,7 +2304,6 @@ const MMP = {
 
         const title = root.querySelector('.mmp-title');
         if (title && title.textContent && title.textContent.includes('Scanning')) {
-            console.log('Preventing stop() during scanning');
             return;
         }
 
@@ -2457,7 +2347,6 @@ const MMP = {
             clearTimeout(this._hijackTimeoutId);
             this._hijackTimeoutId = null;
         }
-        console.log('MMP: Resources cleaned up');
     }
 }
 
