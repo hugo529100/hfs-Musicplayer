@@ -2,7 +2,7 @@ Musicplayer+
 A clean and pure music player that plays directly when clicking file icons.
 
 
-
+260814:"Separated and made independent the audio file extraction and conversion functionality, and built it into this plugin, along with various minor bug fixes and optimizations."
 
 260422: fix some bug ，and add play folder funtion (include sub folders).
 <img width="1080" height="2400" alt="Screenshot_2026-04-22-20-01-02-009_com android chrome" src="https://github.com/user-attachments/assets/875b977e-08c5-41d2-ba43-420740d1a8e1" />
@@ -15,6 +15,7 @@ Fixed the bug where the play button appears and is non-functional on the fronten
 
 ---------------------------------------------------------------
 
+<img width="1080" height="4454" alt="Screenshot_2026-08-14-08-14-34-406_com android chrome" src="https://github.com/user-attachments/assets/8d5f597a-b0c9-4b91-9de3-0486c0de9cb4" />
 
 
 
