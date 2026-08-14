@@ -1,3 +1,4 @@
+// main.js - Musicplayer+ Frontend (Full Version)
 const { h, t } = HFS
 const cfg = HFS.getPluginConfig()
 
@@ -112,6 +113,7 @@ const MMP = {
     _hijackTimeoutId: null,
     _globalInterceptorSetup: false,
     _hijackObserver: null,
+    _isSwitchingToCache: false,
 
     // ========== 检测当前列表是否有音频文件 ==========
     checkAudioInCurrentList() {
@@ -1484,6 +1486,7 @@ const MMP = {
         }
     },
 
+    // ========== updateTimeDisplay 函数 ==========
     updateTimeDisplay(audio) {
         const timeDisplay = document.querySelector('.mmp-time')
         const progressBar = document.querySelector('.mmp-progress-bar')
@@ -1491,7 +1494,9 @@ const MMP = {
         
         if (!timeDisplay) return
         
-        if (audio.duration && isFinite(audio.duration)) {
+        // 检查音频是否有效且有持续时间
+        if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
+            // 正常播放模式 - 显示时间
             if (this.cfg.show_countdown && window.innerWidth <= 600) {
                 timeDisplay.textContent = `-${this.formatTime(audio.duration - audio.currentTime)}`
                 timeDisplay.className = 'mmp-time countdown'
@@ -1500,10 +1505,18 @@ const MMP = {
                 timeDisplay.className = 'mmp-time normal-time'
             }
             
+            // 显示比特率
             if (bitrateDisplay && this.cfg.show_bitrate && this.currentBitrate > 0) {
                 bitrateDisplay.textContent = this.formatBitrateWithUnits(this.currentBitrate)
             }
+            
+            // 更新进度条
+            if (progressBar && !this.isDragging) {
+                progressBar.value = (audio.currentTime / audio.duration) * 10000
+                progressBar.disabled = false
+            }
         } else {
+            // 转码/加载模式 - 显示解码时间
             const elapsed = (Date.now() - this.lastUpdateTime) / 1000
             timeDisplay.textContent = `Decoding: ${this.formatTime(elapsed)}`
             timeDisplay.className = 'mmp-time decoding'
@@ -1515,16 +1528,6 @@ const MMP = {
             
             if (bitrateDisplay) {
                 bitrateDisplay.textContent = ''
-            }
-        }
-        
-        if (progressBar && !this.isDragging) {
-            if (audio.duration && isFinite(audio.duration)) {
-                progressBar.value = (audio.currentTime / audio.duration) * 10000
-                progressBar.disabled = false
-            } else {
-                progressBar.value = 0
-                progressBar.disabled = true
             }
         }
     },
@@ -1605,6 +1608,7 @@ const MMP = {
         this.play(this.playlist[this.index])
     },
 
+    // ========== play 函数 ==========
     async play(entry) {
         const root = document.getElementById('mmp-audio')
         if (!root || !this.audioElement) return
@@ -1629,7 +1633,14 @@ const MMP = {
         this.currentPlayingName = entry.name.replace(/\.[^.]+$/, '')
         this.retryCount = 0
 
+        // 重置音频事件
         audio.ontimeupdate = null
+        audio.oncanplaythrough = null
+        audio.onended = null
+        audio.onpause = null
+        audio.onplay = null
+        audio.onerror = null
+        
         if (progressBar) {
             progressBar.disabled = false
             progressBar.value = 0
@@ -1640,8 +1651,10 @@ const MMP = {
             title.style.whiteSpace = 'nowrap'
             title.style.overflow = 'hidden'
             title.style.textOverflow = 'ellipsis'
+            title.style.color = ''
         }
 
+        // 比特率显示
         const cachedBitrate = this.bitrateCache.get(entry.uri)
         if (cachedBitrate) {
             this.currentBitrate = cachedBitrate
@@ -1657,6 +1670,7 @@ const MMP = {
 
         const isSpecialFormat = this.needTranscodeFormats.test(entry.uri)
         
+        // ===== 设置音频源 =====
         try {
             let cachedAudioUrl = null
             if (this.cfg.enable_cache) {
@@ -1691,16 +1705,27 @@ const MMP = {
                         }, 1000)
                     }
                 } else if (isSpecialFormat && unsupportedPlugin) {
+                    // 转码模式
                     audio.src = entry.uri + "?ffmpeg"
                     this.isTranscoded = true
                     this.ffmpegAttempted = true
+                    this.lastUpdateTime = Date.now()
                     
                     if (progressBar) {
                         progressBar.disabled = true
+                        progressBar.value = 0
+                    }
+                    
+                    // 显示解码状态
+                    const timeDisplay = document.querySelector('.mmp-time')
+                    if (timeDisplay) {
+                        timeDisplay.textContent = 'Decoding: 0:00'
+                        timeDisplay.className = 'mmp-time decoding'
                     }
                     
                     this.getBitrateFromFfmpeg(entry.uri)
                 } else {
+                    // 直接播放
                     if (this.cfg.enable_cache) {
                         try {
                             const response = await fetch(entry.uri)
@@ -1736,8 +1761,33 @@ const MMP = {
                 }
             }
             
+            // ===== 设置时间更新事件 =====
             audio.ontimeupdate = () => this.updateTimeDisplay(audio)
             
+            // ===== 转码模式：转码完成后恢复进度条 =====
+            if (this.isTranscoded) {
+                audio.oncanplaythrough = () => {
+                    if (progressBar) {
+                        progressBar.disabled = false
+                    }
+                    this.isTranscoded = false
+                    audio.ontimeupdate = () => this.updateTimeDisplay(audio)
+                    
+                    if (this.currentBitrate === 0) {
+                        setTimeout(() => {
+                            this.calculateAndCacheBitrate(audio, entry)
+                        }, 1000)
+                    }
+                    
+                    // 立即更新时间显示
+                    this.updateTimeDisplay(audio)
+                }
+                
+                // 启动缓存探测
+                this.startCacheProbe(entry.uri)
+            }
+            
+            // ===== 播放控制 =====
             if (isAppleDevice && this.isTranscoded) {
                 try {
                     await audio.load()
@@ -1751,36 +1801,30 @@ const MMP = {
             
             await this.ensureAudioPlayable(audio)
             
-            if (this.isTranscoded) {
-                audio.oncanplaythrough = () => {
-                    if (progressBar) progressBar.disabled = false
-                    this.isTranscoded = false
-                    audio.ontimeupdate = () => this.updateTimeDisplay(audio)
-                    
-                    if (this.currentBitrate === 0) {
-                        setTimeout(() => {
-                            this.calculateAndCacheBitrate(audio, entry)
-                        }, 1000)
-                    }
-                }
-                this.startCacheProbe(entry.uri)
-            }
-            
             this.isPlaying = true
-            
             if (playPauseBtn) {
                 playPauseBtn.textContent = '➤'
                 playPauseBtn.classList.add('playing')
             }
+            
         } catch (e) {
+            // 错误处理
             if (!isSpecialFormat && unsupportedPlugin && !this.ffmpegAttempted) {
                 try {
                     audio.src = entry.uri + "?ffmpeg"
                     this.isTranscoded = true
                     this.ffmpegAttempted = true
+                    this.lastUpdateTime = Date.now()
                     
                     if (progressBar) {
                         progressBar.disabled = true
+                        progressBar.value = 0
+                    }
+                    
+                    const timeDisplay = document.querySelector('.mmp-time')
+                    if (timeDisplay) {
+                        timeDisplay.textContent = 'Decoding: 0:00'
+                        timeDisplay.className = 'mmp-time decoding'
                     }
                     
                     this.getBitrateFromFfmpeg(entry.uri)
@@ -1796,6 +1840,7 @@ const MMP = {
                     audio.oncanplaythrough = () => {
                         if (progressBar) progressBar.disabled = false
                         this.isTranscoded = false
+                        this.updateTimeDisplay(audio)
                     }
                     
                     this.startCacheProbe(entry.uri)
@@ -1809,10 +1854,12 @@ const MMP = {
             }
         }
         
+        // ===== 音量设置 =====
         audio.volume = this.cfg.audio_vol
         const volDisplay = document.querySelector('.mmp-volume-value')
         if (volDisplay) volDisplay.textContent = `${Math.round(this.cfg.audio_vol * 100)}%`
 
+        // ===== 播放结束事件 =====
         audio.onended = () => {
             if (this.cfg.loop_mode === 'single') {
                 audio.currentTime = 0
@@ -1822,6 +1869,7 @@ const MMP = {
             }
         }
 
+        // ===== 暂停/播放事件 =====
         audio.onpause = () => {
             this.isPlaying = false
             if (playPauseBtn) {
@@ -1835,6 +1883,45 @@ const MMP = {
             if (playPauseBtn) {
                 playPauseBtn.textContent = '➤'
                 playPauseBtn.classList.add('playing')
+            }
+        }
+        
+        // ===== 错误处理 =====
+        audio.onerror = async (e) => {
+            const error = audio.error
+            if (error && (error.code === 2 || error.code === 3 || error.code === 4)) {
+                if (this.retryCount < 3 && this.isTranscoded) {
+                    this.retryCount++
+                    if (title) {
+                        title.textContent = `${this.currentPlayingName} (Retry ${this.retryCount}/3...)`
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 1000 * this.retryCount))
+                    
+                    try {
+                        audio.load()
+                        await this.ensureAudioPlayable(audio)
+                        if (title) title.textContent = this.currentPlayingName
+                        this.retryCount = 0
+                    } catch (retryError) {
+                        // 检查缓存
+                        const cacheInfo = await this.checkCachedVersion(entry.uri)
+                        if (cacheInfo && !this._isSwitchingToCache) {
+                            this._isSwitchingToCache = true
+                            try {
+                                audio.src = cacheInfo.cachedUri
+                                this.isTranscoded = false
+                                this.loadedFromCache = true
+                                if (progressBar) progressBar.disabled = false
+                                await this.ensureAudioPlayable(audio)
+                                if (title) title.textContent = this.currentPlayingName
+                                this._isSwitchingToCache = false
+                                this.retryCount = 0
+                            } catch (cacheError) {
+                                this._isSwitchingToCache = false
+                            }
+                        }
+                    }
+                }
             }
         }
     },
@@ -2043,15 +2130,21 @@ const MMP = {
     },
 
     async switchToCachedVersion(cacheInfo) {
-        if (!this.audioElement || !cacheInfo) return;
+        if (this._isSwitchingToCache || !this.audioElement || !cacheInfo) return;
+        this._isSwitchingToCache = true;
         
         const audio = this.audioElement;
         const progressBar = document.querySelector('.mmp-progress-bar');
+        const title = document.querySelector('.mmp-title');
         const currentTime = audio.currentTime;
         const currentVolume = audio.volume;
         const wasPlaying = !audio.paused;
         
         try {
+            if (title) {
+                title.textContent = `${this.currentPlayingName} (Switching to cache...)`;
+            }
+            
             audio.pause();
             audio.src = cacheInfo.cachedUri;
             this.isTranscoded = false;
@@ -2106,6 +2199,10 @@ const MMP = {
             if (wasPlaying) {
                 await audio.play();
             }
+            
+            if (title) {
+                title.textContent = this.currentPlayingName;
+            }
         } catch (e) {
             audio.src = this.currentPlayingUri;
             audio.currentTime = currentTime;
@@ -2114,6 +2211,8 @@ const MMP = {
                 await audio.play();
             }
             throw e;
+        } finally {
+            this._isSwitchingToCache = false;
         }
     },
 
@@ -2126,10 +2225,6 @@ const MMP = {
             const baseName = fileName.replace(/\.[^/.]+$/, "");
             
             const baseUri = originalUri.replace(/\/[^/]+$/, '');
-            
-            const flacUri = `${baseUri}/cache/${encodeURIComponent(baseName)}.flac`;
-            const flacExists = await this.checkFileExists(flacUri);
-            if (flacExists) return { cachedUri: flacUri, originalUri };
             
             const wavUri = `${baseUri}/cache/${encodeURIComponent(baseName)}.wav`;
             const wavExists = await this.checkFileExists(wavUri);
@@ -2334,6 +2429,7 @@ const MMP = {
         this.loadedFromCache = false;
         this.currentPlayingUri = '';
         this.currentPlayingName = '';
+        this._isSwitchingToCache = false;
     },
 
     // ========== 清理资源 ==========
@@ -2346,6 +2442,10 @@ const MMP = {
         if (this._hijackTimeoutId) {
             clearTimeout(this._hijackTimeoutId);
             this._hijackTimeoutId = null;
+        }
+        if (this.cacheProbeInterval) {
+            clearInterval(this.cacheProbeInterval);
+            this.cacheProbeInterval = null;
         }
     }
 }
