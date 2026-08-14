@@ -2,7 +2,7 @@ Musicplayer+
 A clean and pure music player that plays directly when clicking file icons.
 
 
-260814:"Separated and made independent the audio file extraction and conversion functionality, and built it into this plugin, along with various minor bug fixes and optimizations."
+260814:"Separated and made independent the audio file extraction and conversion functionality, and built it into this plugin, along with various minor bug fixes and optimizations."  "It is now compatible with the native 'hfs-unsupported-videos' / 'rejetto/unsupported-videos' plugin, so the modified version of unsupported-videos that was previously included in my plugin has been removed."
 
 260422: fix some bug ，and add play folder funtion (include sub folders).
 <img width="1080" height="2400" alt="Screenshot_2026-04-22-20-01-02-009_com android chrome" src="https://github.com/user-attachments/assets/875b977e-08c5-41d2-ba43-420740d1a8e1" />
