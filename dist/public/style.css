@@ -20,9 +20,25 @@
     transition: bottom 0.3s ease;
 }
 
-/* 如果有分页控件存在，播放器向上移动 */
-body:has(#paging) .mmp {
-    bottom: 25.6px; /* 根据分页控件高度调整 */
+
+/* 情况1：没有底部 menu-panel，也没有 paging → 贴底部 */
+body:not(:has(.bottom-bar-stack #menu-panel)):not(:has(#paging)) .mmp {
+    bottom: 0;
+}
+
+/* 情况2：只有 paging（没有底部 menu-panel） */
+body:has(#paging):not(:has(.bottom-bar-stack #menu-panel)) .mmp {
+    bottom: 24px;
+}
+
+/* 情况3：只有底部 menu-panel（没有 paging） */
+body:has(.bottom-bar-stack #menu-panel):not(:has(#paging)) .mmp {
+    bottom: 41px;
+}
+
+/* 情况4：两者都有（底部 menu-panel + paging） */
+body:has(.bottom-bar-stack #menu-panel):has(#paging) .mmp {
+    bottom: 64px;  /* 41 + 25.6 */
 }
 
 .mmp-media {
