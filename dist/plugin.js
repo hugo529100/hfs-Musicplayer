@@ -1,5 +1,5 @@
 exports.description = "A clean and pure music player with high-resolution audio support"
-exports.version = 7.2
+exports.version = 7.3
 exports.apiRequired = 9.5
 exports.repo = "Hug3O/Musicplayer+"
 exports.frontend_css = "style.css"
@@ -7,61 +7,98 @@ exports.frontend_js = "main.js"
 
 // ================ Configuration Panel ================
 exports.config = {
+    // ============================================
+    // === Configuration Group Selector ===
+    // ============================================
+    config_tab: {
+        type: 'select',
+        defaultValue: 'playback',
+        options: {
+            '1. Playback': 'playback',
+            '2. Interface': 'ui',
+            '3. Cache & Lossless': 'cache',
+            '4. FFmpeg & Transcoding': 'ffmpeg'
+        },
+        label: "Configuration Category",
+        helperText: "Select a category to view and edit settings.",
+        frontend: true
+    },
+
+    // ============================================
+    // === 1. Playback ===
+    // ============================================
     auto_play: {
+        showIf: x => x.config_tab === 'playback',
         frontend: true,
         label: "Auto play when clicking audio files",
         type: 'boolean',
         defaultValue: true
     },
     use_file_list: {
+        showIf: x => x.config_tab === 'playback',
         frontend: true,
         label: "Show play button in the file list",
         type: 'boolean',
         defaultValue: false
     },
     use_file_menu: {
+        showIf: x => x.config_tab === 'playback',
         frontend: true,
         label: "Show play button under the file menu",
         type: 'boolean',
-        defaultValue: false
+        defaultValue: true
     },
     audio_vol: {
+        showIf: x => x.config_tab === 'playback',
         frontend: true,
         label: "Audio volume",
         helperText: "0.0 to 1.0",
         type: 'number',
         min: 0.0,
         max: 1.0,
-        defaultValue: 0.75,
-        placeholder: "default: 0.75"
+        defaultValue: 1.0,
+        placeholder: "default: 0.95"
     },
+
+    // ============================================
+    // === 2. Interface ===
+    // ============================================
     button_height: {
+        showIf: x => x.config_tab === 'ui',
         frontend: true,
         label: "Button height",
         helperText: "Height of control buttons (e.g. 4vw or 8vh)",
         type: 'string',
-        defaultValue: '4vw',
+        defaultValue: '6vw',
         placeholder: "default: 4vw"
     },
     show_bitrate: {
+        showIf: x => x.config_tab === 'ui',
         frontend: true,
         label: "Show bitrate information",
         type: 'boolean',
         defaultValue: true
     },
     show_countdown: {
+        showIf: x => x.config_tab === 'ui',
         frontend: true,
         label: "Show countdown time on mobile",
         type: 'boolean',
         defaultValue: true
     },
-    hide_back_btn_portrait: {  
+    hide_back_btn_portrait: {
+        showIf: x => x.config_tab === 'ui',
         frontend: true,
         label: "Hide back button in portrait mode",
         type: 'boolean',
         defaultValue: true
     },
+
+    // ============================================
+    // === 3. Cache & Lossless ===
+    // ============================================
     enable_lossless_and_cache: {
+        showIf: x => x.config_tab === 'cache',
         frontend: true,
         label: "Enable lossless audio support & cache check",
         helperText: "Play decoded WAV versions from cache folder",
@@ -69,22 +106,28 @@ exports.config = {
         defaultValue: true
     },
     enable_cache: {
+        showIf: x => x.config_tab === 'cache',
         frontend: false,
         label: "Enable caching",
+        helperText: "Convert audio to WAV in the background and store in cache folder for faster replay.",
         type: 'boolean',
         defaultValue: true
     },
-    
-    // ===== FFmpeg Configuration =====
+
+    // ============================================
+    // === 4. FFmpeg & Transcoding ===
+    // ============================================
     ffmpeg_path: {
+        showIf: x => x.config_tab === 'ffmpeg',
         type: 'real_path',
         fileMask: 'ffmpeg*',
-        defaultValue: '',
+        defaultValue: 'ffmpeg.exe',
         label: "FFmpeg Path",
         helperText: "Path to FFmpeg. Leave empty to use system PATH.",
         xs: 8
     },
     dsd_conversion_mode: {
+        showIf: x => x.config_tab === 'ffmpeg',
         type: 'select',
         label: 'DSD Conversion Quality',
         defaultValue: 'ultra',
@@ -96,42 +139,49 @@ exports.config = {
         helperText: 'Quality setting for DSD to PCM conversion',
         xs: 6
     },
-    max_processes: { 
-        type: 'number', 
-        min: 1, 
-        max: 50, 
-        defaultValue: 3, 
+    max_processes: {
+        showIf: x => x.config_tab === 'ffmpeg',
+        type: 'number',
+        min: 1,
+        max: 50,
+        defaultValue: 3,
         xs: 6,
-        label: "Max concurrent transcodes"
+        label: "Max concurrent transcodes",
+        helperText: "Maximum number of FFmpeg processes running at once across all users."
     },
-    allowAnonymous: { 
-        type: 'boolean', 
-        defaultValue: true, 
+    allowAnonymous: {
+        showIf: x => x.config_tab === 'ffmpeg',
+        type: 'boolean',
+        defaultValue: true,
         xs: 6,
-        label: "Allow anonymous access"
+        label: "Allow anonymous access",
+        helperText: "If disabled, only logged-in users can trigger transcoding."
     },
     max_processes_per_account: {
-        showIf: x => !x.allowAnonymous,
-        type: 'number', 
-        min: 1, 
-        max: 50, 
-        defaultValue: 1, 
+        showIf: x => x.config_tab === 'ffmpeg' && !x.allowAnonymous,
+        type: 'number',
+        min: 1,
+        max: 50,
+        defaultValue: 1,
         xs: 6,
-        label: "Max processes per account"
+        label: "Max processes per account",
+        helperText: "Limit how many transcoding processes a single account can run."
     },
     accounts: {
-        showIf: x => !x.allowAnonymous,
-        type: 'username', 
+        showIf: x => x.config_tab === 'ffmpeg' && !x.allowAnonymous,
+        type: 'username',
         multiple: true,
         label: "Allowed accounts",
         helperText: "Leave empty to allow every account",
         xs: 12
     },
     debug_ffmpeg: {
+        showIf: x => x.config_tab === 'ffmpeg',
         type: 'boolean',
         xs: 6,
         defaultValue: false,
-        label: 'Debug FFmpeg'
+        label: 'Debug FFmpeg',
+        helperText: "Print FFmpeg commands and output to the server log for troubleshooting."
     }
 }
 
