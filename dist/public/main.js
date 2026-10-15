@@ -2,28 +2,22 @@
 const { h, t } = HFS
 const cfg = HFS.getPluginConfig()
 
-// 随机播放状态存储键名
 const SHUFFLE_STORAGE_KEY = 'mmp_shuffle_enabled'
 
-// 检查 localStorage 是否支持
 const isLocalStorageSupported = () => {
   try {
     localStorage.setItem('test', '1');
     localStorage.removeItem('test');
     return true;
-  } catch (e) {
-    return false;
-  }
+  } catch (e) { return false; }
 };
 
-// 获取随机播放状态
 const getShuffleState = () => {
   if (!isLocalStorageSupported()) return true;
   const val = localStorage.getItem(SHUFFLE_STORAGE_KEY);
   return val === null ? true : val === 'true';
 };
 
-// 保存随机播放状态
 const setShuffleState = (value) => {
   if (isLocalStorageSupported()) {
     localStorage.setItem(SHUFFLE_STORAGE_KEY, value ? 'true' : 'false');
@@ -33,7 +27,6 @@ const setShuffleState = (value) => {
 const isAppleDevice = /iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent) && !window.MSStream
 const unsupportedPlugin = HFS.plugins['unsupported-videos'] || HFS.plugins['unsupported-videos']
 
-// ========== fileMenu 事件处理 - 同时支持文件和文件夹 ==========
 if (cfg.use_file_menu) {
     HFS.onEvent('fileMenu', ({ entry }) => {
         if (entry.isFolder) {
@@ -56,7 +49,6 @@ if (cfg.use_file_menu) {
     })
 }
 
-// fileList 事件处理
 if (cfg.use_file_list) {
     HFS.onEvent('afterEntryName', ({ entry }, { setOrder }) => {
         setOrder(-1)
@@ -106,7 +98,7 @@ const MMP = {
     originalPlaylistOrder: [],
     shuffledPlaylist: [],
     hijackedIcons: new WeakSet(),
-    // ========== Preact 钩子相关属性 ==========
+    _userWantsPlay: false,
     _preactHijackerSetup: false,
     _originalPreactDiffed: null,
     _originalPreactCommit: null,
@@ -114,124 +106,77 @@ const MMP = {
     _globalInterceptorSetup: false,
     _hijackObserver: null,
     _isSwitchingToCache: false,
+    _cacheProbeTimer: null,
+    _cacheProbeAttempts: 0,
+    _cacheProbeStartTime: 0,
 
-    // ========== 检测当前列表是否有音频文件 ==========
     checkAudioInCurrentList() {
         const fileItems = document.querySelectorAll('li.file');
-        if (fileItems.length === 0) {
-            return false;
-        }
-        
+        if (fileItems.length === 0) return false;
         for (const li of fileItems) {
             const a = li.querySelector('a[href]');
             if (!a) continue;
             const name = a.textContent?.trim();
-            if (name && this.audio_formats.test(name)) {
-                return true;
-            }
+            if (name && this.audio_formats.test(name)) return true;
         }
         return false;
     },
 
-    // ========== 判断 VNode 是否为文件列表 ==========
     isFileListVNode(vnode) {
         if (!vnode) return false;
-        
-        // 检查类型
         if (vnode.type === 'ul' || vnode.type === 'div') {
             const className = vnode.props?.className || '';
-            if (typeof className === 'string') {
-                if (/file|list|entries/.test(className)) {
-                    return true;
-                }
-            }
+            if (typeof className === 'string' && /file|list|entries/.test(className)) return true;
         }
-        
-        // 检查 children 中是否有 li.file
         if (vnode.__k && Array.isArray(vnode.__k)) {
             for (const child of vnode.__k) {
                 if (child && child.type === 'li') {
                     const cls = child.props?.className || '';
-                    if (typeof cls === 'string' && cls.includes('file')) {
-                        return true;
-                    }
+                    if (typeof cls === 'string' && cls.includes('file')) return true;
                 }
             }
         }
-        
         return false;
     },
 
-    // ========== Preact 钩子劫持器（最可靠） ==========
     setupPreactHijacker() {
         if (this._preactHijackerSetup) return;
-        
-        // 获取 Preact 实例
         const preact = window.preact || window.Preact;
-        if (!preact || !preact.options) {
-            return;
-        }
-        
+        if (!preact || !preact.options) return;
         const options = preact.options;
-        
-        // 保存原始回调
         this._originalPreactDiffed = options.diffed;
         this._originalPreactCommit = options.__c;
-        
         const self = this;
         let hijackTimer = null;
-        
-        // 拦截 diffed 阶段（DOM 已更新，但可能未完全提交）
         options.diffed = function(vnode) {
-            // 检查是否是文件列表
             if (self.isFileListVNode(vnode)) {
                 clearTimeout(hijackTimer);
-                hijackTimer = setTimeout(() => {
-                    self._scheduleHijack();
-                }, 30);
+                hijackTimer = setTimeout(() => { self._scheduleHijack(); }, 30);
             }
-            
-            // 调用原始回调
-            if (self._originalPreactDiffed) {
-                self._originalPreactDiffed(vnode);
-            }
+            if (self._originalPreactDiffed) self._originalPreactDiffed(vnode);
         };
-        
-        // 拦截 commit 阶段（更可靠，DOM 已完全提交）
         options.__c = function(vnode, commitQueue) {
             if (self.isFileListVNode(vnode)) {
                 clearTimeout(hijackTimer);
-                hijackTimer = setTimeout(() => {
-                    self._scheduleHijack();
-                }, 10);
+                hijackTimer = setTimeout(() => { self._scheduleHijack(); }, 10);
             }
-            
-            // 调用原始回调
-            if (self._originalPreactCommit) {
-                self._originalPreactCommit(vnode, commitQueue);
-            }
+            if (self._originalPreactCommit) self._originalPreactCommit(vnode, commitQueue);
         };
-        
         this._preactHijackerSetup = true;
     },
 
-    // ========== 清理 Preact 钩子 ==========
     cleanupPreactHijacker() {
         const preact = window.preact || window.Preact;
         if (!preact || !preact.options) return;
-        
         const options = preact.options;
-        
         if (this._originalPreactDiffed !== null) {
             options.diffed = this._originalPreactDiffed;
             this._originalPreactDiffed = null;
         }
-        
         if (this._originalPreactCommit !== null) {
             options.__c = this._originalPreactCommit;
             this._originalPreactCommit = null;
         }
-        
         this._preactHijackerSetup = false;
         if (this._hijackTimeoutId) {
             clearTimeout(this._hijackTimeoutId);
@@ -239,49 +184,27 @@ const MMP = {
         }
     },
 
-    // ========== 调度劫持（防抖） ==========
     _scheduleHijack() {
-        if (this._hijackTimeoutId) {
-            clearTimeout(this._hijackTimeoutId);
-        }
+        if (this._hijackTimeoutId) clearTimeout(this._hijackTimeoutId);
         this._hijackTimeoutId = setTimeout(() => {
             this._hijackTimeoutId = null;
             this.hijackAllIcons();
         }, 20);
     },
 
-    // ========== 清理劫持标记 ==========
     cleanupHijackedIcons() {
         document.querySelectorAll('li.file[data-mmp-icon-hijacked="true"]').forEach(el => {
             delete el.dataset.mmpIconHijacked;
         });
     },
 
-    // ========== 主动触发列表刷新（兜底） ==========
     triggerListRefresh() {
-        // 方法1：通过 HFS API 刷新（如果存在）
-        if (HFS.refreshList && typeof HFS.refreshList === 'function') {
-            HFS.refreshList();
-            return;
-        }
-        
-        // 方法2：模拟点击刷新按钮
+        if (HFS.refreshList && typeof HFS.refreshList === 'function') { HFS.refreshList(); return; }
         const refreshBtn = document.querySelector('.refresh-button, [data-refresh], .btn-refresh');
-        if (refreshBtn) {
-            refreshBtn.click();
-            return;
-        }
-        
-        // 方法3：触发 HFS 内部事件
-        if (HFS.emitEvent && typeof HFS.emitEvent === 'function') {
-            HFS.emitEvent('refreshRequest', {});
-            return;
-        }
-        
-        // 方法4：重新加载当前路径（最后手段）
+        if (refreshBtn) { refreshBtn.click(); return; }
+        if (HFS.emitEvent && typeof HFS.emitEvent === 'function') { HFS.emitEvent('refreshRequest', {}); return; }
         if (window.location && window.location.pathname) {
             const currentPath = window.location.pathname + window.location.search;
-            // 使用 history API 触发刷新
             if (window.history && window.history.pushState) {
                 window.history.pushState({}, '', currentPath);
                 window.dispatchEvent(new PopStateEvent('popstate'));
@@ -291,32 +214,13 @@ const MMP = {
 
     async debugSimple(folderPath) {
         let cleanPath = folderPath;
-        if (!cleanPath.startsWith('/')) {
-            cleanPath = '/' + cleanPath;
-        }
-        if (!cleanPath.endsWith('/')) {
-            cleanPath = cleanPath + '/';
-        }
-        
+        if (!cleanPath.startsWith('/')) cleanPath = '/' + cleanPath;
+        if (!cleanPath.endsWith('/')) cleanPath = cleanPath + '/';
         const apiUrl = `/~/api/get_file_list?uri=${encodeURIComponent(cleanPath)}`;
-        
         try {
             const response = await fetch(apiUrl);
-            
-            if (!response.ok) {
-                return { error: `HTTP ${response.status}` };
-            }
-            
-            const data = await response.json();
-            
-            if (data && data.list) {
-                data.list.forEach(item => {
-                    const isAudio = this.audio_formats && this.audio_formats.test(item.n);
-                    // 仅用于调试，保留但不输出
-                });
-            }
-            
-            return data;
+            if (!response.ok) return { error: `HTTP ${response.status}` };
+            return await response.json();
         } catch (error) {
             return { error: error.message };
         }
@@ -326,53 +230,33 @@ const MMP = {
         let allFiles = [];
         const queue = [folderUri];
         const processed = new Set();
-        
         while (queue.length > 0) {
             const currentUri = queue.shift();
-            
             if (processed.has(currentUri)) continue;
             processed.add(currentUri);
-            
             try {
                 let scanUri = currentUri;
                 if (!scanUri.endsWith('/')) scanUri = scanUri + '/';
-                
                 const apiUrl = `${scanUri}?get=list&folders=*`;
-                
                 const response = await fetch(apiUrl);
-                if (!response.ok) {
-                    continue;
-                }
-                
+                if (!response.ok) continue;
                 const text = await response.text();
                 const lines = text.split('\n').filter(line => line.trim());
-                
                 for (const line of lines) {
                     const url = line.trim();
                     if (!url) continue;
-                    
                     const fileName = decodeURIComponent(url.split('/').pop());
-                    
                     if (url.endsWith('/')) {
                         queue.push(url);
                     } else {
                         if (/\.(mp3|flac|wav|ogg|m4a|aac|opus|wma|aiff)$/i.test(fileName)) {
-                            allFiles.push({
-                                name: fileName,
-                                uri: url,
-                                size: 0
-                            });
+                            allFiles.push({ name: fileName, uri: url, size: 0 });
                         }
                     }
                 }
-                
                 await new Promise(r => setTimeout(r, 200));
-                
-            } catch (error) {
-                // 静默处理错误
-            }
+            } catch (error) {}
         }
-        
         const unique = [];
         const seen = new Set();
         for (const file of allFiles) {
@@ -381,40 +265,26 @@ const MMP = {
                 unique.push(file);
             }
         }
-        
         return unique;
     },
 
     async playFolder(entry) {
         let folderUri = entry.uri;
-        
-        if (folderUri && !folderUri.startsWith('/')) {
-            folderUri = '/' + folderUri;
-        }
-        
-        if (folderUri && !folderUri.endsWith('/')) {
-            folderUri = folderUri + '/';
-        }
-        
+        if (folderUri && !folderUri.startsWith('/')) folderUri = '/' + folderUri;
+        if (folderUri && !folderUri.endsWith('/')) folderUri = folderUri + '/';
         const root = document.getElementById('mmp-audio');
         if (root) {
             root.style.display = 'flex';
             const title = root.querySelector('.mmp-title');
-            if (title) {
-                title.textContent = `Scanning: ${entry.name || 'folder'}...`;
-            }
+            if (title) title.textContent = `Scanning: ${entry.name || 'folder'}...`;
         }
-        
         try {
             const testUrl = `/~/api/get_file_list?uri=${encodeURIComponent(folderUri)}`;
-            
             const testResponse = await fetch(testUrl);
             if (!testResponse.ok) {
                 throw new Error(`Cannot access folder: HTTP ${testResponse.status}`);
             }
-            
             const playlist = await this.getRecursivePlaylist(folderUri);
-            
             if (playlist.length === 0) {
                 const title = root?.querySelector('.mmp-title');
                 if (title) {
@@ -423,7 +293,6 @@ const MMP = {
                 }
                 return;
             }
-            
             const title = root?.querySelector('.mmp-title');
             if (title) {
                 title.textContent = `${playlist.length} songs - ${entry.name}`;
@@ -434,9 +303,7 @@ const MMP = {
                     }
                 }, 2000);
             }
-            
             this.originalPlaylistOrder = [...playlist];
-            
             if (this.shuffleEnabled) {
                 for (let i = playlist.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
@@ -449,11 +316,8 @@ const MMP = {
                 this.playlist = playlist;
                 this.index = 0;
             }
-            
             this.currentFolder = folderUri;
-            
             await this.play(this.playlist[this.index]);
-            
         } catch (error) {
             const title = root?.querySelector('.mmp-title');
             if (title) {
@@ -465,36 +329,20 @@ const MMP = {
 
     async init() {
         const savedVol = localStorage.getItem('mmp_volume')
-        if (savedVol) {
-            this.cfg.audio_vol = parseFloat(savedVol)
-        }
+        if (savedVol) this.cfg.audio_vol = parseFloat(savedVol)
         
-        if (this.cfg.enable_cache) {
-            this.restoreCachedPlaylists()
-        }
-        
-        if (this.cfg.enable_cache) {
-            await this.initIndexedDB()
-        }
+        if (this.cfg.enable_cache) this.restoreCachedPlaylists()
+        if (this.cfg.enable_cache) await this.initIndexedDB()
         
         this.initPlayerElement()
         this.setupAudioBindings()
         
         if (window.HFS && HFS.onEvent) {
-            
-            // ========== 第一层拦截：entryIcon:after 清空 output ==========
-            // 阻止 hfs-click-icon-to-show 在图标上绑定 HFS.fileShow
             if (cfg.auto_play) {
                 HFS.onEvent('entryIcon:after', ({ def, entry }, { output }) => {
                     if (!MMP.audio_formats.test(entry.uri)) return;
-                    
-                    // 保留其他插件（MVfiles-covers）的封面图标
                     const iconDef = output.find(Boolean) || def;
-                    
-                    // 清空 output，阻止 hfs-click-icon-to-show 添加它的包裹
                     output.length = 0;
-                    
-                    // 返回带标记的图标，但不在这里绑定事件（交给 DOM 劫持）
                     return HFS.h('span', {
                         class: 'mmp-audio-icon-target',
                         'data-mmp-audio': 'true',
@@ -509,67 +357,43 @@ const MMP = {
                 document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
             })
             
-            // ========== 修改：afterList 事件 - 增强劫持 ==========
             HFS.onEvent('afterList', () => {
                 if (this.isPlaying) {
                     document.getElementById('mmp-audio').style.display = 'flex'
                 }
-                
                 if (cfg.auto_play) {
-                    // 立即尝试劫持
                     this.hijackAllIcons();
-                    
-                    // 延迟多次重试，覆盖不同渲染阶段
                     [50, 150, 350, 700, 1200].forEach(delay => {
                         setTimeout(() => {
-                            // 检查是否有未劫持的音频文件
                             const unHijacked = document.querySelectorAll('li.file:not([data-mmp-icon-hijacked="true"])');
                             let hasAudio = false;
                             for (const li of unHijacked) {
                                 const a = li.querySelector('a[href]');
                                 const name = a?.textContent?.trim();
-                                if (name && this.audio_formats.test(name)) {
-                                    hasAudio = true;
-                                    break;
-                                }
+                                if (name && this.audio_formats.test(name)) { hasAudio = true; break; }
                             }
-                            if (hasAudio) {
-                                this.hijackAllIcons();
-                            }
+                            if (hasAudio) this.hijackAllIcons();
                         }, delay);
                     });
-                    
-                    // 兜底检查：如果还有未劫持的音频文件，尝试刷新列表
                     setTimeout(() => {
                         const unHijacked = document.querySelectorAll('li.file:not([data-mmp-icon-hijacked="true"])');
                         let hasUnhijackedAudio = false;
                         for (const li of unHijacked) {
                             const a = li.querySelector('a[href]');
                             const name = a?.textContent?.trim();
-                            if (name && this.audio_formats.test(name)) {
-                                hasUnhijackedAudio = true;
-                                break;
-                            }
+                            if (name && this.audio_formats.test(name)) { hasUnhijackedAudio = true; break; }
                         }
-                        
                         if (hasUnhijackedAudio) {
-                            // 先尝试 Preact 钩子再次劫持
                             this._scheduleHijack();
-                            // 如果还是不行，触发列表刷新
                             setTimeout(() => {
                                 const stillUnhijacked = document.querySelectorAll('li.file:not([data-mmp-icon-hijacked="true"])');
                                 let stillHasAudio = false;
                                 for (const li of stillUnhijacked) {
                                     const a = li.querySelector('a[href]');
                                     const name = a?.textContent?.trim();
-                                    if (name && this.audio_formats.test(name)) {
-                                        stillHasAudio = true;
-                                        break;
-                                    }
+                                    if (name && this.audio_formats.test(name)) { stillHasAudio = true; break; }
                                 }
-                                if (stillHasAudio) {
-                                    this.triggerListRefresh();
-                                }
+                                if (stillHasAudio) this.triggerListRefresh();
                             }, 500);
                         }
                     }, 1500);
@@ -582,84 +406,47 @@ const MMP = {
                 })
             }
 
-            HFS.onEvent('remotePlay', ({ uri }) => {
-                this.handleRemotePlay(uri)
-            })
-
-            HFS.onEvent('remoteStop', () => {
-                this.handleRemoteStop()
-            })
+            HFS.onEvent('remotePlay', ({ uri }) => this.handleRemotePlay(uri))
+            HFS.onEvent('remoteStop', () => this.handleRemoteStop())
         }
         
-        // ========== 第二层拦截：DOM 劫持（兜底） ==========
-        if (cfg.auto_play) {
-            this.startIconHijacker();
-        }
-        
-        // ========== 第三层拦截：Preact 钩子（最可靠） ==========
-        if (cfg.auto_play) {
-            // 延迟一点设置 Preact 钩子，确保 Preact 已加载
-            setTimeout(() => {
-                this.setupPreactHijacker();
-            }, 50);
-        }
-        
-        // ========== 第四层拦截：全局点击兜底 ==========
-        if (cfg.auto_play) {
-            this.setupGlobalClickInterceptor();
-        }
+        if (cfg.auto_play) this.startIconHijacker();
+        if (cfg.auto_play) setTimeout(() => { this.setupPreactHijacker(); }, 50);
+        if (cfg.auto_play) this.setupGlobalClickInterceptor();
     },
 
-    // ========== 全局点击拦截（最后防线） ==========
     setupGlobalClickInterceptor() {
         if (this._globalInterceptorSetup) return;
         this._globalInterceptorSetup = true;
-        
         const self = this;
         document.addEventListener('click', function(e) {
             const target = e.target.closest('li.file');
             if (!target) return;
-            
-            // 如果已经被劫持，跳过
             if (target.dataset.mmpIconHijacked === 'true') return;
-            
             const a = target.querySelector('a[href]');
             if (!a) return;
-            
             const name = a.textContent?.trim();
             if (!name || !self.audio_formats.test(name)) return;
-            
-            // 检查点击的是否是图标区域
             const icon = target.querySelector('span.icon, [class*="media-icon"]');
             if (!icon || !icon.contains(e.target)) return;
-            
-            // 拦截
             e.preventDefault();
             e.stopImmediatePropagation();
             e.stopPropagation();
-            
             const entry = self.findEntryByName(name) || { 
-                name, 
-                uri: a.href,
-                ext: name.split('.').pop().toLowerCase()
+                name, uri: a.href, ext: name.split('.').pop().toLowerCase()
             };
             self.audio(entry);
             target.dataset.mmpIconHijacked = 'true';
-        }, true); // 捕获阶段
+        }, true);
     },
 
-    // ========== 图标劫持系统 ==========
     startIconHijacker() {
         if (!cfg.auto_play) return;
-        
-        // 多次延时劫持，覆盖不同渲染阶段
         [200, 500, 1000, 2000, 3000].forEach(delay => {
             setTimeout(() => this.hijackAllIcons(), delay);
         });
-        
         const self = this;
         let debounceTimer = null;
-        
         const observer = new MutationObserver((mutations) => {
             let shouldHijack = false;
             for (const mutation of mutations) {
@@ -671,10 +458,7 @@ const MMP = {
                                 node.classList.contains('file') ||
                                 node.classList.contains('list-wrapper') ||
                                 node.querySelector('.icon')
-                            )) {
-                                shouldHijack = true;
-                                break;
-                            }
+                            )) { shouldHijack = true; break; }
                         }
                     }
                 }
@@ -683,10 +467,8 @@ const MMP = {
             if (shouldHijack) {
                 clearTimeout(debounceTimer);
                 debounceTimer = setTimeout(() => {
-                    // 检查是否有音频文件
                     if (self.checkAudioInCurrentList()) {
                         self.hijackAllIcons();
-                        // 二次确认
                         setTimeout(() => {
                             const unHijacked = document.querySelectorAll('li.file:not([data-mmp-icon-hijacked="true"])');
                             for (const li of unHijacked) {
@@ -702,43 +484,23 @@ const MMP = {
                 }, 100);
             }
         });
-        
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-        
-        // 保存 observer 以便清理
+        observer.observe(document.body, { childList: true, subtree: true });
         this._hijackObserver = observer;
     },
 
     hijackAllIcons() {
         if (!cfg.auto_play) return;
-        
-        // 快速检查是否有音频文件
-        if (!this.checkAudioInCurrentList()) {
-            return;
-        }
-        
+        if (!this.checkAudioInCurrentList()) return;
         const fileItems = document.querySelectorAll('li.file:not([data-mmp-icon-hijacked="true"])');
         if (fileItems.length === 0) return;
-        
-        let hijackedCount = 0;
-        let audioCount = 0;
-        
         fileItems.forEach((li) => {
             const a = li.querySelector('a[href]');
             const name = a?.textContent?.trim();
             if (!name || !this.audio_formats.test(name)) return;
-            
-            audioCount++;
-            
-            // 优先找我们标记的图标包裹，其次找普通图标
             let icon = li.querySelector('.mmp-audio-icon-target');
             if (!icon) {
                 icon = li.querySelector('span.icon, [class*="media-icon"]');
                 if (icon) {
-                    // 找到父级包裹元素
                     if (icon.parentElement && icon.parentElement.tagName === 'SPAN' && 
                         icon.parentElement !== li.querySelector('a') &&
                         icon.parentElement.querySelector('span.icon, [class*="media-icon"]')) {
@@ -747,37 +509,25 @@ const MMP = {
                 }
             }
             if (!icon) return;
-            
             li.dataset.mmpIconHijacked = 'true';
-            hijackedCount++;
-            
             const entry = this.findEntryByName(name) || { 
-                name, 
-                uri: a.href,
-                ext: name.split('.').pop().toLowerCase()
+                name, uri: a.href, ext: name.split('.').pop().toLowerCase()
             };
-            
             icon.style.cursor = 'pointer';
             icon.title = 'Play with Musicplayer+';
-            
             this.hijackElementClicks(icon, entry);
         });
     },
 
     hijackElementClicks(element, entry) {
         if (!element || this.hijackedIcons.has(element)) return;
-        
         this.hijackedIcons.add(element);
-        
-        // 捕获阶段拦截，优先级最高
         element.addEventListener('click', (e) => {
             e.stopImmediatePropagation();
             e.stopPropagation();
             e.preventDefault();
             this.audio(entry);
         }, true);
-        
-        // 冒泡阶段也拦截，双重保险
         element.addEventListener('click', (e) => {
             e.stopImmediatePropagation();
             e.stopPropagation();
@@ -786,237 +536,154 @@ const MMP = {
         }, false);
     },
 
-    // 显示当前播放文件的 fileMenu
-    async showFileMenuForCurrentSong() {
-        if (!this.currentPlayingUri) {
-            return;
-        }
-        
-        try {
-            const fileName = this.currentPlayingName + (this.currentPlayingUri.match(/\.[^.]+$/)?.[0] || '');
-            const folderUri = this.currentPlayingUri.replace(/\/[^/]+$/, '') + '/';
-            
-            const entry = {
-                name: fileName,
-                uri: this.currentPlayingUri,
-                isFolder: false,
-                ext: fileName.split('.').pop().toLowerCase()
-            };
-            
-            const response = await fetch(`/~/api/get_file_list?uri=${encodeURIComponent(folderUri)}`);
-            const data = await response.json();
-            const fileInfo = data.list?.find(f => f.n === fileName);
-            
-            if (fileInfo) {
-                entry.size = fileInfo.s;
-                entry.modified = fileInfo.m;
+    // ================================================================
+    // ========== File Menu 打开逻辑(支持懒加载列表) ==========
+    // ================================================================
+
+    // 在 DOM 中按文件名查找链接元素
+    findLinkByName(fileName) {
+        if (!fileName) return null;
+        const links = document.querySelectorAll('li.file a[href]');
+        let fallback = null;
+        for (const a of links) {
+            const entryName =
+                a.querySelector('.entry-name')?.textContent?.trim() ||
+                a.textContent?.trim();
+            if (!entryName) continue;
+            if (entryName === fileName) return a;
+            if (!fallback &&
+                entryName.replace(/\.[^.]+$/, '') === fileName.replace(/\.[^.]+$/, '')) {
+                fallback = a;
             }
-            
-            if (HFS.onEvent && HFS.emitEvent) {
-                const menuContainer = this.createFileMenuContainer(entry);
-                if (menuContainer) {
-                    document.body.appendChild(menuContainer);
+        }
+        return fallback;
+    },
+
+    // 让列表滚动/翻页,尝试把目标文件加载进 DOM
+    async ensureFileVisible(fileName, maxSteps = 80) {
+        if (this.findLinkByName(fileName)) return true;
+
+        // 常见的滚动容器候选
+        const candidates = [
+            document.querySelector('.list-wrapper'),
+            document.querySelector('.file-list'),
+            document.querySelector('main'),
+            document.querySelector('#list'),
+            document.scrollingElement,
+            document.documentElement,
+            document.body
+        ].filter(Boolean);
+
+        // 选出真正可滚动的容器
+        const scrollers = candidates.filter(el => el.scrollHeight > el.clientHeight + 10);
+
+        if (scrollers.length === 0) {
+            return !!this.findLinkByName(fileName);
+        }
+
+        let lastCount = document.querySelectorAll('li.file').length;
+        let stuck = 0;
+
+        for (let step = 0; step < maxSteps; step++) {
+            // 对每个可滚动容器都尝试滚到底部,触发懒加载
+            for (const scroller of scrollers) {
+                scroller.scrollTop = scroller.scrollHeight;
+                scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+            }
+            window.dispatchEvent(new Event('scroll'));
+
+            // 等待懒加载渲染
+            await new Promise(r => setTimeout(r, 120));
+
+            if (this.findLinkByName(fileName)) {
+                const link = this.findLinkByName(fileName);
+                if (link && link.scrollIntoView) {
+                    try { link.scrollIntoView({ block: 'center' }); } catch (e) {}
+                    await new Promise(r => setTimeout(r, 60));
                 }
+                return true;
+            }
+
+            const count = document.querySelectorAll('li.file').length;
+            if (count === lastCount) {
+                stuck++;
+                if (stuck > 4) break; // 连续多次没有新内容,放弃
             } else {
-                this.showSimpleFileMenu(entry);
+                stuck = 0;
+                lastCount = count;
             }
-        } catch (error) {
-            this.showSimpleFileMenu({ uri: this.currentPlayingUri, name: this.currentPlayingName });
         }
+        return !!this.findLinkByName(fileName);
     },
-    
-    createFileMenuContainer(entry) {
-        try {
-            const menuItems = [];
-            
-            menuItems.push({
-                id: 'download',
-                label: 'Download',
-                icon: 'download',
-                onClick: () => this.downloadCurrentFile()
-            });
-            
-            menuItems.push({
-                id: 'info',
-                label: 'File Info',
-                icon: 'info',
-                onClick: () => this.showFileInfo(entry)
-            });
-            
-            const menu = document.createElement('div');
-            menu.className = 'mmp-filemenu-popup';
-            menu.style.cssText = `
-                position: fixed;
-                background: var(--bg);
-                border: 1px solid var(--text);
-                border-radius: 0.4em;
-                padding: 0.3em 0;
-                min-width: 150px;
-                z-index: 10000;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            `;
-            
-            menuItems.forEach(item => {
-                const menuItem = document.createElement('div');
-                menuItem.className = 'mmp-filemenu-item';
-                menuItem.style.cssText = `
-                    padding: 0.5em 1em;
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    gap: 0.5em;
-                    transition: background 0.2s;
-                `;
-                menuItem.innerHTML = `
-                    <span style="font-size: 1em;">${item.icon === 'download' ? '⬇️' : item.icon === 'info' ? 'ℹ️' : '📄'}</span>
-                    <span>${item.label}</span>
-                `;
-                menuItem.onmouseover = () => menuItem.style.background = 'var(--faint-contrast)';
-                menuItem.onmouseout = () => menuItem.style.background = '';
-                menuItem.onclick = () => {
-                    item.onClick();
-                    menu.remove();
-                };
-                menu.appendChild(menuItem);
-            });
-            
-            const closeMenu = (e) => {
-                if (!menu.contains(e.target)) {
-                    menu.remove();
-                    document.removeEventListener('click', closeMenu);
-                    document.removeEventListener('contextmenu', closeMenu);
-                }
-            };
-            setTimeout(() => {
-                document.addEventListener('click', closeMenu);
-                document.addEventListener('contextmenu', closeMenu);
-            }, 0);
-            
-            const fileMenuBtn = document.querySelector('.mmp-filemenu-btn');
-            if (fileMenuBtn) {
-                const rect = fileMenuBtn.getBoundingClientRect();
-                menu.style.bottom = (window.innerHeight - rect.top + 5) + 'px';
-                menu.style.right = (window.innerWidth - rect.right) + 'px';
-            } else {
-                menu.style.bottom = '50px';
-                menu.style.right = '10px';
-            }
-            
-            return menu;
-        } catch (e) {
-            return null;
+
+    async openNativeFileMenuForCurrent() {
+        if (!this.currentPlayingUri && !this.currentPlayingName) {
+            this.showError('Nothing is playing');
+            return false;
         }
-    },
-    
-    showSimpleFileMenu(entry) {
-        const menu = document.createElement('div');
-        menu.className = 'mmp-filemenu-popup';
-        menu.style.cssText = `
-            position: fixed;
-            background: var(--bg);
-            border: 1px solid var(--text);
-            border-radius: 0.4em;
-            padding: 0.3em 0;
-            min-width: 150px;
-            z-index: 10000;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        `;
-        
-        const items = [
-            { label: 'Download', action: () => this.downloadCurrentFile() },
-            { label: 'File Info', action: () => this.showFileInfo(entry) }
-        ];
-        
-        items.forEach(item => {
-            const menuItem = document.createElement('div');
-            menuItem.textContent = item.label;
-            menuItem.style.cssText = `
-                padding: 0.5em 1em;
-                cursor: pointer;
-                transition: background 0.2s;
-            `;
-            menuItem.onmouseover = () => menuItem.style.background = 'var(--faint-contrast)';
-            menuItem.onmouseout = () => menuItem.style.background = '';
-            menuItem.onclick = () => {
-                item.action();
-                menu.remove();
-            };
-            menu.appendChild(menuItem);
-        });
-        
-        const closeMenu = (e) => {
-            if (!menu.contains(e.target)) {
-                menu.remove();
-                document.removeEventListener('click', closeMenu);
-            }
-        };
-        setTimeout(() => document.addEventListener('click', closeMenu), 0);
-        
-        const fileMenuBtn = document.querySelector('.mmp-filemenu-btn');
-        if (fileMenuBtn) {
-            const rect = fileMenuBtn.getBoundingClientRect();
-            menu.style.bottom = (window.innerHeight - rect.top + 5) + 'px';
-            menu.style.right = (window.innerWidth - rect.right) + 'px';
-        } else {
-            menu.style.bottom = '50px';
-            menu.style.right = '10px';
+        if (document.querySelector('.dialog-backdrop.file-dialog, .dialog-backdrop.file-show')) {
+            return true;
         }
-        
-        document.body.appendChild(menu);
-    },
-    
-    downloadCurrentFile() {
+
+        let fileName = '';
         if (this.currentPlayingUri) {
-            const link = document.createElement('a');
-            link.href = this.currentPlayingUri;
-            link.download = this.currentPlayingName + (this.currentPlayingUri.match(/\.[^.]+$/)?.[0] || '');
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            fileName = decodeURIComponent(this.currentPlayingUri.split('/').pop());
         }
-    },
-    
-    showFileInfo(entry) {
-        const infoDialog = document.createElement('div');
-        infoDialog.className = 'mmp-fileinfo-dialog';
-        infoDialog.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: var(--bg);
-            border: 2px solid var(--text);
-            border-radius: 0.5em;
-            padding: 1.5em;
-            z-index: 10001;
-            min-width: 250px;
-            max-width: 400px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        `;
-        
-        infoDialog.innerHTML = `
-            <h3 style="margin: 0 0 1em 0; border-bottom: 1px solid var(--text); padding-bottom: 0.5em;">File Information</h3>
-            <div style="margin-bottom: 0.5em;"><strong>Name:</strong> ${this.currentPlayingName}</div>
-            <div style="margin-bottom: 0.5em;"><strong>URI:</strong> <span style="word-break: break-all;">${this.currentPlayingUri}</span></div>
-            ${entry.size ? `<div style="margin-bottom: 0.5em;"><strong>Size:</strong> ${this.formatFileSize(entry.size)}</div>` : ''}
-            ${entry.modified ? `<div style="margin-bottom: 0.5em;"><strong>Modified:</strong> ${new Date(entry.modified).toLocaleString()}</div>` : ''}
-            <div style="margin-bottom: 0.5em;"><strong>Format:</strong> ${this.currentPlayingUri.match(/\.[^.]+$/)?.[0]?.toUpperCase() || 'Unknown'}</div>
-            ${this.currentBitrate ? `<div style="margin-bottom: 0.5em;"><strong>Bitrate:</strong> ${this.formatBitrateWithUnits(this.currentBitrate)}</div>` : ''}
-            <div style="margin-top: 1.5em; text-align: right;">
-                <button style="padding: 0.3em 1em; cursor: pointer;">Close</button>
-            </div>
-        `;
-        
-        const closeBtn = infoDialog.querySelector('button');
-        closeBtn.onclick = () => infoDialog.remove();
-        
-        infoDialog.addEventListener('click', (e) => {
-            if (e.target === infoDialog) infoDialog.remove();
+        if (!fileName && this.currentPlayingName) fileName = this.currentPlayingName;
+        if (!fileName) {
+            this.showError('Cannot resolve current file');
+            return false;
+        }
+
+        // 1) 先在 DOM 里找
+        let targetLink = this.findLinkByName(fileName);
+
+        // 2) 没找到,尝试滚动/翻页让列表加载该文件
+        if (!targetLink) {
+            const titleEl = document.querySelector('.mmp-title');
+            const originalTitle = titleEl?.textContent;
+            if (titleEl) titleEl.textContent = `${this.currentPlayingName} (Locating...)`;
+
+            try {
+                await this.ensureFileVisible(fileName);
+            } finally {
+                if (titleEl && originalTitle !== undefined) {
+                    titleEl.textContent = originalTitle;
+                }
+            }
+            targetLink = this.findLinkByName(fileName);
+        }
+
+        if (!targetLink) {
+            this.showError('Current file is not in this list');
+            return false;
+        }
+
+        const entryNameEl =
+            targetLink.querySelector('.entry-name') || targetLink;
+
+        if (!entryNameEl) {
+            this.showError('Cannot find file name element');
+            return false;
+        }
+
+        entryNameEl.dispatchEvent(new MouseEvent('click', {
+            bubbles: true, cancelable: true, view: window
+        }));
+
+        return new Promise((resolve) => {
+            const startedAt = Date.now();
+            const check = () => {
+                if (document.querySelector('.dialog-backdrop.file-dialog, .dialog-backdrop.file-show')) {
+                    return resolve(true);
+                }
+                if (Date.now() - startedAt >= 2000) return resolve(false);
+                setTimeout(check, 30);
+            };
+            check();
         });
-        
-        document.body.appendChild(infoDialog);
     },
-    
+
     formatFileSize(bytes) {
         if (!bytes) return 'Unknown';
         const units = ['B', 'KB', 'MB', 'GB'];
@@ -1032,23 +699,18 @@ const MMP = {
     addFileMenuButton() {
         const headerControls = document.querySelector('.mmp-header-controls');
         if (!headerControls) return;
-        
         if (document.querySelector('.mmp-filemenu-btn')) return;
-        
         const fileMenuBtn = document.createElement('button');
         fileMenuBtn.type = 'button';
         fileMenuBtn.className = 'mmp-filemenu-btn';
         fileMenuBtn.title = 'File Menu';
         fileMenuBtn.textContent = '☰';
-        
-        fileMenuBtn.addEventListener('click', (e) => {
+        fileMenuBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            this.showFileMenuForCurrentSong();
+            await this.openNativeFileMenuForCurrent();
         });
-        
         const volumeControl = headerControls.querySelector('.mmp-volume-control');
         const closeBtn = headerControls.querySelector('.mmp-close');
-        
         if (volumeControl && closeBtn) {
             headerControls.insertBefore(fileMenuBtn, closeBtn);
         } else {
@@ -1059,12 +721,10 @@ const MMP = {
     toggleShuffle() {
         this.shuffleEnabled = !this.shuffleEnabled;
         setShuffleState(this.shuffleEnabled);
-        
         const shuffleBtn = document.querySelector('.mmp-shuffle-btn');
         if (shuffleBtn) {
             shuffleBtn.textContent = this.shuffleEnabled ? '⋈' : '⇌';
         }
-        
         if (this.playlist.length > 0) {
             if (this.shuffleEnabled) {
                 if (this.originalPlaylistOrder.length === 0) {
@@ -1094,30 +754,25 @@ const MMP = {
         if (!this.shuffleEnabled || this.playlist.length <= 1) {
             return (this.index + 1) % this.playlist.length;
         }
-        
         let nextIndex;
         do {
             nextIndex = Math.floor(Math.random() * this.playlist.length);
         } while (nextIndex === this.index && this.playlist.length > 1);
-        
         return nextIndex;
     },
 
     async initIndexedDB() {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(this.dbName, this.dbVersion)
-            
             request.onerror = () => {
                 this.isDbInitialized = false
                 reject(request.error)
             }
-            
             request.onsuccess = () => {
                 this.db = request.result
                 this.isDbInitialized = true
                 resolve()
             }
-            
             request.onupgradeneeded = (event) => {
                 const db = event.target.result
                 if (!db.objectStoreNames.contains('audioCache')) {
@@ -1130,68 +785,45 @@ const MMP = {
 
     async getCachedAudioFromDB(uri) {
         if (!this.isDbInitialized) return null
-        
         return new Promise((resolve) => {
             const transaction = this.db.transaction(['audioCache'], 'readonly')
             const store = transaction.objectStore('audioCache')
             const request = store.get(uri)
-            
             request.onsuccess = () => {
                 const result = request.result
                 if (result) {
                     const blob = new Blob([result.data], { type: result.contentType })
                     const blobUrl = URL.createObjectURL(blob)
-                    resolve({
-                        blobUrl,
-                        size: result.size,
-                        timestamp: result.timestamp
-                    })
+                    resolve({ blobUrl, size: result.size, timestamp: result.timestamp })
                 } else {
                     resolve(null)
                 }
             }
-            
-            request.onerror = () => {
-                resolve(null)
-            }
+            request.onerror = () => { resolve(null) }
         })
     },
 
     async cacheAudioToDB(uri, arrayBuffer, contentType) {
         if (!this.isDbInitialized) return false
-        
         return new Promise((resolve) => {
             const transaction = this.db.transaction(['audioCache'], 'readwrite')
             const store = transaction.objectStore('audioCache')
-            
             const audioData = {
-                uri: uri,
-                data: arrayBuffer,
-                contentType: contentType,
-                size: arrayBuffer.byteLength,
-                timestamp: Date.now()
+                uri, data: arrayBuffer, contentType,
+                size: arrayBuffer.byteLength, timestamp: Date.now()
             }
-            
             const request = store.put(audioData)
-            
-            request.onsuccess = async () => {
-                resolve(true)
-            }
-            
-            request.onerror = () => {
-                resolve(false)
-            }
+            request.onsuccess = async () => { resolve(true) }
+            request.onerror = () => { resolve(false) }
         })
     },
 
     async removeCachedAudioFromDB(uri) {
         if (!this.isDbInitialized) return
-        
         return new Promise((resolve) => {
             const transaction = this.db.transaction(['audioCache'], 'readwrite')
             const store = transaction.objectStore('audioCache')
             const request = store.delete(uri)
-            
             request.onsuccess = () => resolve()
             request.onerror = () => resolve()
         })
@@ -1199,7 +831,6 @@ const MMP = {
 
     async getCachedAudio(uri) {
         if (!this.cfg.enable_cache) return null
-        
         const memoryCached = this.audioCache.get(uri)
         if (memoryCached && memoryCached.blobUrl) {
             if (Date.now() - memoryCached.timestamp < 3600000) {
@@ -1209,46 +840,33 @@ const MMP = {
                 this.audioCache.delete(uri)
             }
         }
-        
         const dbCached = await this.getCachedAudioFromDB(uri)
         if (dbCached) {
             this.audioCache.set(uri, dbCached)
             return dbCached.blobUrl
         }
-        
         return null
     },
 
     async cacheAudio(uri, arrayBuffer, contentType) {
         if (!this.cfg.enable_cache) return null
-        
         try {
             const storedInDB = await this.cacheAudioToDB(uri, arrayBuffer, contentType)
-            
             if (storedInDB) {
                 const blob = new Blob([arrayBuffer], { type: contentType })
                 const blobUrl = URL.createObjectURL(blob)
-                
-                const cacheInfo = {
-                    blobUrl,
-                    size: arrayBuffer.byteLength,
-                    timestamp: Date.now(),
-                    contentType
-                }
-                
-                this.audioCache.set(uri, cacheInfo)
+                this.audioCache.set(uri, {
+                    blobUrl, size: arrayBuffer.byteLength,
+                    timestamp: Date.now(), contentType
+                })
                 return blobUrl
             }
-        } catch (e) {
-            // 静默处理缓存失败
-        }
-        
+        } catch (e) {}
         return null
     },
 
     persistPlaylistData() {
         if (!this.cfg.enable_cache) return;
-        
         try {
             const dataToSave = {
                 folderCache: Array.from(this.folderCache.entries()),
@@ -1259,14 +877,11 @@ const MMP = {
                 timestamp: Date.now()
             }
             localStorage.setItem(this.storageKey, JSON.stringify(dataToSave))
-        } catch (e) {
-            // 静默处理持久化失败
-        }
+        } catch (e) {}
     },
 
     restoreCachedPlaylists() {
         if (!this.cfg.enable_cache) return;
-        
         try {
             const saved = localStorage.getItem(this.storageKey)
             if (saved) {
@@ -1279,23 +894,19 @@ const MMP = {
                     this.shuffledPlaylist = data.shuffledPlaylist || []
                 }
             }
-        } catch (e) {
-            // 静默处理恢复失败
-        }
+        } catch (e) {}
     },
 
     async getPlaylist(folderUri, forceRefresh = false) {
         if (!this.cfg.enable_cache) {
             return this.fetchPlaylistFromServer(folderUri)
         }
-        
         if (forceRefresh || !this.folderCache.has(folderUri)) {
             const playlist = await this.fetchPlaylistFromServer(folderUri)
             this.folderCache.set(folderUri, playlist)
             this.persistPlaylistData()
             return playlist
         }
-        
         return this.folderCache.get(folderUri)
     },
 
@@ -1304,7 +915,6 @@ const MMP = {
             const res = await fetch(`/~/api/get_file_list?uri=${encodeURIComponent(folderUri)}`)
             const data = await res.json()
             const raw = data.list || []
-
             return raw
                 .filter(f => this.audio_formats.test(f.n))
                 .map(f => ({
@@ -1318,11 +928,8 @@ const MMP = {
 
     handleRemotePlay(uri) {
         if (!uri) return
-        
         this.isRemoteControlled = true
-        
         const folderUri = uri.replace(/\/[^/]+$/, '') + '/'
-        
         this.getPlaylist(folderUri).then(playlist => {
             this.playRemoteFile(uri, playlist)
         }).catch(() => {
@@ -1332,20 +939,16 @@ const MMP = {
 
     playRemoteFile(uri, playlist) {
         const fileName = decodeURIComponent(uri.split('/').pop())
-        
         this.playlist = playlist.length > 0 ? playlist : [{ name: fileName, uri }]
-        
         const idx = this.playlist.findIndex(f =>
             f.uri === uri || decodeURIComponent(f.uri) === decodeURIComponent(uri)
         )
-        
         this.index = idx >= 0 ? idx : 0
         this.play(this.playlist[this.index])
     },
 
     handleRemoteStop() {
         this.isRemoteControlled = false
-        
         if (this.currentPlayingUri) {
             const currentFolder = this.currentPlayingUri.replace(/\/[^/]+$/, '') + '/'
             if (currentFolder !== this.currentFolder) {
@@ -1361,17 +964,12 @@ const MMP = {
 
     initPlayerElement() {
         document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
-        
         const progressHTML = `
             <div class='mmp-progress-container'>
                 <input type="range" class='mmp-progress-bar' min="0" max="10000" value="0" step="1">
                 <div class='mmp-loading-indicator'></div>
             </div>`
-        
-        const bitrateHTML = this.cfg.show_bitrate ? `
-            <span class='mmp-bitrate'></span>
-        ` : ''
-        
+        const bitrateHTML = this.cfg.show_bitrate ? `<span class='mmp-bitrate'></span>` : ''
         const playerHTML = `
         <div id='mmp-audio' class='mmp' style='display:none'>
             <audio class='mmp-media'></audio>
@@ -1404,16 +1002,12 @@ const MMP = {
         </div>
     </div>`;
         document.body.insertAdjacentHTML('beforeend', playerHTML)
-
         this.audioElement = document.querySelector('#mmp-audio audio')
-        
-        this.addFileMenuButton();
-        
+        this.addFileMenuButton()
         const shuffleBtn = document.querySelector('.mmp-shuffle-btn')
         if (shuffleBtn) {
             shuffleBtn.addEventListener('click', () => this.toggleShuffle())
         }
-
         document.querySelector('.mmp-prev')?.addEventListener('click', () => {
             setTimeout(() => this.playPrev(), 300)
         })
@@ -1424,7 +1018,6 @@ const MMP = {
         document.querySelector('.mmp-vol-down')?.addEventListener('click', () => this.adjustVolume(-5))
         document.querySelector('.mmp-vol-up')?.addEventListener('click', () => this.adjustVolume(5))
         document.querySelector('.mmp-close')?.addEventListener('click', () => this.stop())
-        
         document.querySelector('.mmp-custom-button')?.addEventListener('click', () => {
             const upButton = document.querySelector('.header a[href*="parent="]')
             if (upButton) {
@@ -1433,40 +1026,33 @@ const MMP = {
                 window.history.back()
             }
         })
-        
         const progressBar = document.querySelector('.mmp-progress-bar')
         if (progressBar) {
             const audio = this.audioElement
-            
             progressBar.addEventListener('mousedown', () => {
                 if (!this.isTranscoded) this.isDragging = true
             })
-
             progressBar.addEventListener('touchstart', () => {
                 if (!this.isTranscoded) this.isDragging = true
             }, { passive: true })
-
             progressBar.addEventListener('input', (e) => {
                 if (this.isDragging && audio?.duration && isFinite(audio.duration) && !this.isTranscoded) {
                     const seekTime = (e.target.value / 10000) * audio.duration
                     audio.currentTime = seekTime
                 }
             })
-
             progressBar.addEventListener('mouseup', (e) => {
                 if (!this.isTranscoded) {
                     this.handleProgressChange(e)
                     this.isDragging = false
                 }
             })
-
             progressBar.addEventListener('touchend', (e) => {
                 if (!this.isTranscoded) {
                     this.handleProgressChange(e)
                     this.isDragging = false
                 }
             }, { passive: true })
-
             progressBar.addEventListener('touchmove', (e) => {
                 if (this.isDragging && !this.isTranscoded) {
                     e.preventDefault()
@@ -1479,24 +1065,18 @@ const MMP = {
                     }
                 }
             }, { passive: false })
-
             if (audio) {
                 audio.ontimeupdate = () => this.updateTimeDisplay(audio)
             }
         }
     },
 
-    // ========== updateTimeDisplay 函数 ==========
     updateTimeDisplay(audio) {
         const timeDisplay = document.querySelector('.mmp-time')
         const progressBar = document.querySelector('.mmp-progress-bar')
         const bitrateDisplay = document.querySelector('.mmp-bitrate')
-        
         if (!timeDisplay) return
-        
-        // 检查音频是否有效且有持续时间
         if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
-            // 正常播放模式 - 显示时间
             if (this.cfg.show_countdown && window.innerWidth <= 600) {
                 timeDisplay.textContent = `-${this.formatTime(audio.duration - audio.currentTime)}`
                 timeDisplay.className = 'mmp-time countdown'
@@ -1504,28 +1084,21 @@ const MMP = {
                 timeDisplay.textContent = `${this.formatTime(audio.currentTime)} / ${this.formatTime(audio.duration)}`
                 timeDisplay.className = 'mmp-time normal-time'
             }
-            
-            // 显示比特率
             if (bitrateDisplay && this.cfg.show_bitrate && this.currentBitrate > 0) {
                 bitrateDisplay.textContent = this.formatBitrateWithUnits(this.currentBitrate)
             }
-            
-            // 更新进度条
             if (progressBar && !this.isDragging) {
                 progressBar.value = (audio.currentTime / audio.duration) * 10000
                 progressBar.disabled = false
             }
         } else {
-            // 转码/加载模式 - 显示解码时间
             const elapsed = (Date.now() - this.lastUpdateTime) / 1000
             timeDisplay.textContent = `Decoding: ${this.formatTime(elapsed)}`
             timeDisplay.className = 'mmp-time decoding'
-            
             if (progressBar) {
                 progressBar.value = 0
                 progressBar.disabled = true
             }
-            
             if (bitrateDisplay) {
                 bitrateDisplay.textContent = ''
             }
@@ -1534,25 +1107,17 @@ const MMP = {
 
     formatBitrateWithUnits(bitrate) {
         if (bitrate >= 1000000) {
-            const mbps = bitrate / 1000000
-            return `${mbps.toFixed(1)} Mbps`
+            return `${(bitrate / 1000000).toFixed(1)} Mbps`
         } else if (bitrate >= 1000) {
             const kbps = bitrate / 1000
-            if (kbps >= 100) {
-                return `${Math.round(kbps)} kbps`
-            } else if (kbps >= 10) {
-                return `${kbps.toFixed(1)} kbps`
-            } else {
-                return `${kbps.toFixed(1)} kbps`
-            }
-        } else {
-            return `${Math.round(bitrate)} bps`
+            if (kbps >= 100) return `${Math.round(kbps)} kbps`
+            return `${kbps.toFixed(1)} kbps`
         }
+        return `${Math.round(bitrate)} bps`
     },
 
     formatBitrate(bitrate) {
-        const kbps = Math.round(bitrate / 1000)
-        return `${kbps} kbps`
+        return `${Math.round(bitrate / 1000)} kbps`
     },
 
     handleProgressChange(e) {
@@ -1566,9 +1131,7 @@ const MMP = {
 
     async audio(entry) {
         if (this.isRemoteControlled) return
-
         const folderUri = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/'
-
         if (this.playlist.length && this.currentFolder === folderUri) {
             const idx = this.playlist.findIndex(f =>
                 f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
@@ -1578,11 +1141,8 @@ const MMP = {
                 return this.play(this.playlist[this.index])
             }
         }
-
         const playlist = await this.getPlaylist(folderUri)
-        
         this.originalPlaylistOrder = [...playlist];
-        
         if (this.shuffleEnabled) {
             const currentSong = playlist.find(f => 
                 f.uri === entry.uri || decodeURIComponent(f.uri) === decodeURIComponent(entry.uri)
@@ -1602,21 +1162,15 @@ const MMP = {
             )
             this.index = idx >= 0 ? idx : 0
         }
-        
         this.currentFolder = folderUri
-        
         this.play(this.playlist[this.index])
     },
 
-    // ========== play 函数 ==========
     async play(entry) {
         const root = document.getElementById('mmp-audio')
         if (!root || !this.audioElement) return
 
-        if (this.cacheProbeInterval) {
-            clearInterval(this.cacheProbeInterval)
-            this.cacheProbeInterval = null
-        }
+        this._stopCacheProbe()
 
         const audio = this.audioElement
         const title = root.querySelector('.mmp-title')
@@ -1632,8 +1186,8 @@ const MMP = {
         this.currentPlayingUri = entry.uri
         this.currentPlayingName = entry.name.replace(/\.[^.]+$/, '')
         this.retryCount = 0
+        this._userWantsPlay = true
 
-        // 重置音频事件
         audio.ontimeupdate = null
         audio.oncanplaythrough = null
         audio.onended = null
@@ -1654,7 +1208,6 @@ const MMP = {
             title.style.color = ''
         }
 
-        // 比特率显示
         const cachedBitrate = this.bitrateCache.get(entry.uri)
         if (cachedBitrate) {
             this.currentBitrate = cachedBitrate
@@ -1663,14 +1216,12 @@ const MMP = {
             }
         } else {
             this.currentBitrate = 0
-            if (bitrateDisplay) {
-                bitrateDisplay.textContent = ''
-            }
+            if (bitrateDisplay) bitrateDisplay.textContent = ''
         }
 
         const isSpecialFormat = this.needTranscodeFormats.test(entry.uri)
+        let isStreamMode = false
         
-        // ===== 设置音频源 =====
         try {
             let cachedAudioUrl = null
             if (this.cfg.enable_cache) {
@@ -1681,11 +1232,8 @@ const MMP = {
                 audio.src = cachedAudioUrl
                 this.isTranscoded = false
                 this.loadedFromCache = true
-                
                 if (this.currentBitrate === 0) {
-                    setTimeout(() => {
-                        this.calculateAndCacheBitrate(audio, entry)
-                    }, 1000)
+                    setTimeout(() => { this.calculateAndCacheBitrate(audio, entry) }, 1000)
                 }
             } else {
                 let cacheInfo = null
@@ -1698,42 +1246,33 @@ const MMP = {
                     this.isTranscoded = false
                     this.loadedFromCache = true
                     if (progressBar) progressBar.disabled = false
-                    
                     if (this.currentBitrate === 0) {
-                        setTimeout(() => {
-                            this.calculateAndCacheBitrate(audio, entry)
-                        }, 1000)
+                        setTimeout(() => { this.calculateAndCacheBitrate(audio, entry) }, 1000)
                     }
                 } else if (isSpecialFormat && unsupportedPlugin) {
-                    // 转码模式
                     audio.src = entry.uri + "?ffmpeg"
                     this.isTranscoded = true
                     this.ffmpegAttempted = true
                     this.lastUpdateTime = Date.now()
+                    isStreamMode = true
                     
                     if (progressBar) {
                         progressBar.disabled = true
                         progressBar.value = 0
                     }
-                    
-                    // 显示解码状态
                     const timeDisplay = document.querySelector('.mmp-time')
                     if (timeDisplay) {
                         timeDisplay.textContent = 'Decoding: 0:00'
                         timeDisplay.className = 'mmp-time decoding'
                     }
-                    
-                    this.getBitrateFromFfmpeg(entry.uri)
+                    this.startCacheProbe(entry.uri)
                 } else {
-                    // 直接播放
                     if (this.cfg.enable_cache) {
                         try {
                             const response = await fetch(entry.uri)
                             const arrayBuffer = await response.arrayBuffer()
                             const contentType = response.headers.get('content-type') || 'audio/mpeg'
-                            
                             this.tryParseBitrateFromFile(entry, arrayBuffer, contentType)
-                            
                             const cachedUrl = await this.cacheAudio(entry.uri, arrayBuffer, contentType)
                             if (cachedUrl) {
                                 audio.src = cachedUrl
@@ -1743,17 +1282,13 @@ const MMP = {
                         } catch (fetchError) {
                             audio.src = entry.uri
                             if (this.currentBitrate === 0) {
-                                setTimeout(() => {
-                                    this.calculateAndCacheBitrate(audio, entry)
-                                }, 1000)
+                                setTimeout(() => { this.calculateAndCacheBitrate(audio, entry) }, 1000)
                             }
                         }
                     } else {
                         audio.src = entry.uri
                         if (this.currentBitrate === 0) {
-                            setTimeout(() => {
-                                this.calculateAndCacheBitrate(audio, entry)
-                            }, 1000)
+                            setTimeout(() => { this.calculateAndCacheBitrate(audio, entry) }, 1000)
                         }
                     }
                     this.isTranscoded = false
@@ -1761,33 +1296,20 @@ const MMP = {
                 }
             }
             
-            // ===== 设置时间更新事件 =====
             audio.ontimeupdate = () => this.updateTimeDisplay(audio)
             
-            // ===== 转码模式：转码完成后恢复进度条 =====
             if (this.isTranscoded) {
                 audio.oncanplaythrough = () => {
-                    if (progressBar) {
-                        progressBar.disabled = false
-                    }
+                    if (progressBar) progressBar.disabled = false
                     this.isTranscoded = false
                     audio.ontimeupdate = () => this.updateTimeDisplay(audio)
-                    
                     if (this.currentBitrate === 0) {
-                        setTimeout(() => {
-                            this.calculateAndCacheBitrate(audio, entry)
-                        }, 1000)
+                        setTimeout(() => { this.calculateAndCacheBitrate(audio, entry) }, 1000)
                     }
-                    
-                    // 立即更新时间显示
                     this.updateTimeDisplay(audio)
                 }
-                
-                // 启动缓存探测
-                this.startCacheProbe(entry.uri)
             }
             
-            // ===== 播放控制 =====
             if (isAppleDevice && this.isTranscoded) {
                 try {
                     await audio.load()
@@ -1799,51 +1321,66 @@ const MMP = {
                 } catch (e) {}
             }
             
-            await this.ensureAudioPlayable(audio)
-            
-            this.isPlaying = true
-            if (playPauseBtn) {
-                playPauseBtn.textContent = '➤'
-                playPauseBtn.classList.add('playing')
+            if (isStreamMode) {
+                const self = this
+                const tryPlayOnReady = () => {
+                    if (!self._userWantsPlay) return
+                    if (self.currentPlayingUri !== entry.uri) return
+                    audio.play().then(() => {
+                        self.isPlaying = true
+                        if (playPauseBtn) {
+                            playPauseBtn.textContent = '➤'
+                            playPauseBtn.classList.add('playing')
+                        }
+                    }).catch(() => {})
+                }
+                audio.addEventListener('canplay', tryPlayOnReady, { once: true })
+                audio.addEventListener('loadeddata', tryPlayOnReady, { once: true })
+                setTimeout(() => {
+                    if (!self.isPlaying && self.currentPlayingUri === entry.uri) {
+                        self.checkCachedVersion(entry.uri).then(info => {
+                            if (info && self._userWantsPlay) self.switchToCachedVersion(info)
+                        }).catch(() => {})
+                    }
+                }, 4000)
+            } else {
+                await this.ensureAudioPlayable(audio)
+                this.isPlaying = true
+                if (playPauseBtn) {
+                    playPauseBtn.textContent = '➤'
+                    playPauseBtn.classList.add('playing')
+                }
             }
             
         } catch (e) {
-            // 错误处理
-            if (!isSpecialFormat && unsupportedPlugin && !this.ffmpegAttempted) {
+            if (isStreamMode) {
+            } else if (!isSpecialFormat && unsupportedPlugin && !this.ffmpegAttempted) {
                 try {
                     audio.src = entry.uri + "?ffmpeg"
                     this.isTranscoded = true
                     this.ffmpegAttempted = true
                     this.lastUpdateTime = Date.now()
-                    
                     if (progressBar) {
                         progressBar.disabled = true
                         progressBar.value = 0
                     }
-                    
                     const timeDisplay = document.querySelector('.mmp-time')
                     if (timeDisplay) {
                         timeDisplay.textContent = 'Decoding: 0:00'
                         timeDisplay.className = 'mmp-time decoding'
                     }
-                    
-                    this.getBitrateFromFfmpeg(entry.uri)
-                    
-                    await this.ensureAudioPlayable(audio)
-                    this.isPlaying = true
-                    
-                    if (playPauseBtn) {
-                        playPauseBtn.textContent = '➤'
-                        playPauseBtn.classList.add('playing')
-                    }
-                    
-                    audio.oncanplaythrough = () => {
-                        if (progressBar) progressBar.disabled = false
-                        this.isTranscoded = false
-                        this.updateTimeDisplay(audio)
-                    }
-                    
                     this.startCacheProbe(entry.uri)
+                    const self = this
+                    audio.addEventListener('canplay', () => {
+                        if (!self._userWantsPlay) return
+                        audio.play().then(() => {
+                            self.isPlaying = true
+                            if (playPauseBtn) {
+                                playPauseBtn.textContent = '➤'
+                                playPauseBtn.classList.add('playing')
+                            }
+                        }).catch(() => {})
+                    }, { once: true })
                 } catch (e2) {
                     this.showError("Cannot play this audio format")
                     this.pause()
@@ -1854,12 +1391,10 @@ const MMP = {
             }
         }
         
-        // ===== 音量设置 =====
         audio.volume = this.cfg.audio_vol
         const volDisplay = document.querySelector('.mmp-volume-value')
         if (volDisplay) volDisplay.textContent = `${Math.round(this.cfg.audio_vol * 100)}%`
 
-        // ===== 播放结束事件 =====
         audio.onended = () => {
             if (this.cfg.loop_mode === 'single') {
                 audio.currentTime = 0
@@ -1868,8 +1403,6 @@ const MMP = {
                 this.playNext()
             }
         }
-
-        // ===== 暂停/播放事件 =====
         audio.onpause = () => {
             this.isPlaying = false
             if (playPauseBtn) {
@@ -1877,7 +1410,6 @@ const MMP = {
                 playPauseBtn.classList.remove('playing')
             }
         }
-
         audio.onplay = () => {
             this.isPlaying = true
             if (playPauseBtn) {
@@ -1886,7 +1418,6 @@ const MMP = {
             }
         }
         
-        // ===== 错误处理 =====
         audio.onerror = async (e) => {
             const error = audio.error
             if (error && (error.code === 2 || error.code === 3 || error.code === 4)) {
@@ -1896,16 +1427,14 @@ const MMP = {
                         title.textContent = `${this.currentPlayingName} (Retry ${this.retryCount}/3...)`
                     }
                     await new Promise(resolve => setTimeout(resolve, 1000 * this.retryCount))
-                    
                     try {
                         audio.load()
                         await this.ensureAudioPlayable(audio)
                         if (title) title.textContent = this.currentPlayingName
                         this.retryCount = 0
                     } catch (retryError) {
-                        // 检查缓存
                         const cacheInfo = await this.checkCachedVersion(entry.uri)
-                        if (cacheInfo && !this._isSwitchingToCache) {
+                        if (cacheInfo && !this._isSwitchingToCache && this._userWantsPlay) {
                             this._isSwitchingToCache = true
                             try {
                                 audio.src = cacheInfo.cachedUri
@@ -1927,36 +1456,19 @@ const MMP = {
     },
 
     async getBitrateFromFfmpeg(uri) {
-        try {
-            const testAudio = new Audio();
-            testAudio.src = uri + "?ffmpeg&probe";
-            
-            testAudio.addEventListener('loadedmetadata', () => {
-                if (testAudio.duration && testAudio.duration > 0) {
-                    this.fetchFileSizeAndCalculateBitrate(uri, testAudio.duration);
-                }
-            });
-            
-            testAudio.addEventListener('error', () => {});
-            
-            testAudio.load();
-            
-        } catch (e) {}
+        return;
     },
 
     async fetchFileSizeAndCalculateBitrate(uri, duration) {
         try {
             const response = await fetch(uri, { method: 'HEAD' });
             const contentLength = response.headers.get('content-length');
-            
             if (contentLength && duration > 0) {
                 const fileSize = parseInt(contentLength);
                 const bitrate = Math.round((fileSize * 8) / duration);
-                
                 if (bitrate > 0) {
                     this.currentBitrate = bitrate;
                     this.bitrateCache.set(uri, bitrate);
-                    
                     const bitrateDisplay = document.querySelector('.mmp-bitrate');
                     if (bitrateDisplay && this.cfg.show_bitrate) {
                         bitrateDisplay.textContent = this.formatBitrateWithUnits(bitrate);
@@ -1969,44 +1481,28 @@ const MMP = {
     tryParseBitrateFromFile(entry, arrayBuffer, contentType) {
         try {
             const ext = entry.name.split('.').pop().toLowerCase();
-            
             switch(ext) {
-                case 'mp3':
-                    this.parseMp3Bitrate(arrayBuffer, entry);
-                    break;
-                default:
-                    // 其他格式不处理
+                case 'mp3': this.parseMp3Bitrate(arrayBuffer, entry); break;
+                default: break;
             }
         } catch (e) {}
     },
 
     parseMp3Bitrate(arrayBuffer, entry) {
         try {
-            if (arrayBuffer.byteLength < 100) {
-                return;
-            }
-            
+            if (arrayBuffer.byteLength < 100) return;
             const view = new DataView(arrayBuffer);
-            
             for (let i = 0; i < Math.min(1000, arrayBuffer.byteLength - 4); i++) {
                 const header = view.getUint32(i);
-                
                 if ((header & 0xFFE00000) === 0xFFE00000) {
                     const bitrateIndex = (header >> 12) & 0x0F;
-                    
-                    const mpeg1Layer3Bitrates = [
-                        0, 32, 40, 48, 56, 64, 80, 96, 
-                        112, 128, 160, 192, 224, 256, 320, 0
-                    ];
-                    
+                    const mpeg1Layer3Bitrates = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0];
                     if (bitrateIndex > 0 && bitrateIndex < 15) {
                         const bitrateKbps = mpeg1Layer3Bitrates[bitrateIndex];
                         if (bitrateKbps > 0) {
                             const bitrateBps = bitrateKbps * 1000;
-                            
                             this.currentBitrate = bitrateBps;
                             this.bitrateCache.set(entry.uri, bitrateBps);
-                            
                             const bitrateDisplay = document.querySelector('.mmp-bitrate');
                             if (bitrateDisplay && this.cfg.show_bitrate) {
                                 bitrateDisplay.textContent = this.formatBitrateWithUnits(bitrateBps);
@@ -2014,7 +1510,6 @@ const MMP = {
                             return;
                         }
                     }
-                    
                     break;
                 }
             }
@@ -2023,12 +1518,10 @@ const MMP = {
 
     calculateAndCacheBitrate(audio, entry) {
         if (this.currentBitrate > 0) return;
-        
         const bitrate = this.calculateBitrateFromAudio(audio, entry);
         if (bitrate > 0) {
             this.currentBitrate = bitrate;
             this.bitrateCache.set(entry.uri, bitrate);
-            
             const bitrateDisplay = document.querySelector('.mmp-bitrate');
             if (bitrateDisplay && this.cfg.show_bitrate) {
                 bitrateDisplay.textContent = this.formatBitrateWithUnits(bitrate);
@@ -2039,36 +1532,19 @@ const MMP = {
     calculateBitrateFromAudio(audio, entry) {
         try {
             const cachedBitrate = this.bitrateCache.get(entry.uri);
-            if (cachedBitrate) {
-                return cachedBitrate;
-            }
-            
+            if (cachedBitrate) return cachedBitrate;
             if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
                 this.fetchFileSizeAndCalculate(entry.uri, audio.duration);
                 return 0;
             }
-            
             const ext = entry.name.split('.').pop().toLowerCase();
             const defaultBitrates = {
-                'mp3': 320000,
-                'aac': 256000,
-                'ogg': 320000,
-                'opus': 192000,
-                'flac': 1000000,
-                'wav': 1411000,
-                'm4a': 256000,
-                'aif': 1411000,
-                'aiff': 1411000,
-                'alac': 1000000,
-                'dsd': 2822400,
-                'dsf': 2822400,
-                'dff': 2822400,
-                'ape': 1000000
+                'mp3': 320000, 'aac': 256000, 'ogg': 320000, 'opus': 192000,
+                'flac': 1000000, 'wav': 1411000, 'm4a': 256000,
+                'aif': 1411000, 'aiff': 1411000, 'alac': 1000000,
+                'dsd': 2822400, 'dsf': 2822400, 'dff': 2822400, 'ape': 1000000
             };
-            
-            const defaultBitrate = defaultBitrates[ext] || 128000;
-            return defaultBitrate;
-            
+            return defaultBitrates[ext] || 128000;
         } catch (e) {
             return 0;
         }
@@ -2078,15 +1554,12 @@ const MMP = {
         try {
             const response = await fetch(uri, { method: 'HEAD' });
             const contentLength = response.headers.get('content-length');
-            
             if (contentLength && duration > 0) {
                 const fileSize = parseInt(contentLength);
                 const bitrate = Math.round((fileSize * 8) / duration);
-                
                 if (bitrate > 0) {
                     this.currentBitrate = bitrate;
                     this.bitrateCache.set(uri, bitrate);
-                    
                     const bitrateDisplay = document.querySelector('.mmp-bitrate');
                     if (bitrateDisplay && this.cfg.show_bitrate) {
                         bitrateDisplay.textContent = this.formatBitrateWithUnits(bitrate);
@@ -2110,126 +1583,252 @@ const MMP = {
         }
     },
 
-    async startCacheProbe(originalUri) {
-        if (this.loadedFromCache || !this.cfg.enable_lossless_and_cache || !this.needTranscodeFormats.test(originalUri)) return;
-        
-        if (this.cacheProbeInterval) {
-            clearInterval(this.cacheProbeInterval);
-        }
-        
-        this.cacheProbeInterval = setInterval(async () => {
+    // ================================================================
+    // ========== 缓存探测(★ 每 10 秒,最长 5 分钟) ==========
+    // ================================================================
+    startCacheProbe(originalUri) {
+        if (this.loadedFromCache) return;
+        if (!this.cfg.enable_lossless_and_cache) return;
+        if (!this.needTranscodeFormats.test(originalUri)) return;
+
+        this._stopCacheProbe();
+        this._cacheProbeAttempts = 0;
+
+        const self = this;
+        const PROBE_INTERVAL = 10000;              // 每 10 秒一次
+        const PROBE_MAX_DURATION = 5 * 60 * 1000;  // 最长 5 分钟
+        const startTime = Date.now();
+
+        const trySwitch = async () => {
+            if (self._isSwitchingToCache) return;
+            if (self.loadedFromCache) { self._stopCacheProbe(); return; }
+            if (self.currentPlayingUri !== originalUri) { self._stopCacheProbe(); return; }
+
+            // 超过 5 分钟,停止探测
+            if (Date.now() - startTime > PROBE_MAX_DURATION) {
+                self._stopCacheProbe();
+                return;
+            }
+
+            self._cacheProbeAttempts++;
+
             try {
-                const cacheInfo = await this.checkCachedVersion(originalUri);
+                const cacheInfo = await self.checkCachedVersion(originalUri);
                 if (cacheInfo) {
-                    await this.switchToCachedVersion(cacheInfo);
-                    clearInterval(this.cacheProbeInterval);
-                    this.cacheProbeInterval = null;
+                    await self.switchToCachedVersion(cacheInfo);
+                    self._stopCacheProbe();
+                    return;
                 }
             } catch (e) {}
-        }, 5000);
+
+            // 未命中,10 秒后继续
+            self._cacheProbeTimer = setTimeout(trySwitch, PROBE_INTERVAL);
+        };
+
+        // 立即探测一次
+        trySwitch();
+    },
+
+    _stopCacheProbe() {
+        if (this._cacheProbeTimer) {
+            clearTimeout(this._cacheProbeTimer);
+            this._cacheProbeTimer = null;
+        }
+        this._cacheProbeAttempts = 0;
+        this._cacheProbeStartTime = 0;
+        if (this.cacheProbeInterval) {
+            clearInterval(this.cacheProbeInterval);
+            this.cacheProbeInterval = null;
+        }
     },
 
     async switchToCachedVersion(cacheInfo) {
         if (this._isSwitchingToCache || !this.audioElement || !cacheInfo) return;
         this._isSwitchingToCache = true;
-        
+
         const audio = this.audioElement;
         const progressBar = document.querySelector('.mmp-progress-bar');
         const title = document.querySelector('.mmp-title');
+        const playPauseBtn = document.querySelector('.mmp-play-pause');
+        const timeDisplay = document.querySelector('.mmp-time');
+
         const currentTime = audio.currentTime;
         const currentVolume = audio.volume;
-        const wasPlaying = !audio.paused;
-        
-        try {
-            if (title) {
-                title.textContent = `${this.currentPlayingName} (Switching to cache...)`;
-            }
-            
-            audio.pause();
-            audio.src = cacheInfo.cachedUri;
-            this.isTranscoded = false;
-            this.loadedFromCache = true;
-            
-            await new Promise((resolve) => {
-                if (audio.readyState >= 3) {
-                    resolve();
-                } else {
-                    audio.oncanplay = resolve;
-                    setTimeout(resolve, 1000);
-                }
-            });
-            
-            audio.currentTime = currentTime;
-            audio.volume = currentVolume;
-            
-            audio.ontimeupdate = () => {
-                const timeDisplay = document.querySelector('.mmp-time');
-                const bitrateDisplay = document.querySelector('.mmp-bitrate');
-                
-                if (timeDisplay) {
-                    if (audio.duration && isFinite(audio.duration)) {
-                        if (this.cfg.show_countdown && window.innerWidth <= 600) {
-                            timeDisplay.textContent = `-${this.formatTime(audio.duration - audio.currentTime)}`;
-                            timeDisplay.className = 'mmp-time countdown';
-                        } else {
-                            timeDisplay.textContent = `${this.formatTime(audio.currentTime)} / ${this.formatTime(audio.duration)}`;
-                            timeDisplay.className = 'mmp-time normal-time';
-                        }
-                    } else {
-                        timeDisplay.textContent = `${this.formatTime(audio.currentTime)}`;
-                        timeDisplay.className = 'mmp-time normal-time';
-                    }
-                }
-                
-                if (bitrateDisplay && this.cfg.show_bitrate && this.currentBitrate > 0) {
-                    bitrateDisplay.textContent = this.formatBitrateWithUnits(this.currentBitrate);
-                }
-                
-                if (progressBar && !this.isDragging) {
-                    if (audio.duration && isFinite(audio.duration)) {
-                        progressBar.value = (audio.currentTime / audio.duration) * 10000;
-                        progressBar.disabled = false;
-                    } else {
-                        progressBar.value = 0;
-                        progressBar.disabled = true;
-                    }
-                }
-            };
-            
-            if (wasPlaying) {
-                await audio.play();
-            }
-            
-            if (title) {
-                title.textContent = this.currentPlayingName;
-            }
-        } catch (e) {
-            audio.src = this.currentPlayingUri;
-            audio.currentTime = currentTime;
-            audio.volume = currentVolume;
-            if (wasPlaying) {
-                await audio.play();
-            }
-            throw e;
-        } finally {
-            this._isSwitchingToCache = false;
+        const shouldResume = this._userWantsPlay;
+        const originalUri = this.currentPlayingUri;
+
+        if (title) {
+            title.textContent = `${this.currentPlayingName} (Switching to cache...)`;
         }
+        if (timeDisplay) {
+            timeDisplay.textContent = 'Switching...';
+            timeDisplay.className = 'mmp-time decoding';
+        }
+
+        audio.ontimeupdate = null;
+        audio.pause();
+        audio.preload = 'auto';
+        audio.src = cacheInfo.cachedUri;
+        audio.load();
+
+        const targetTime = currentTime;
+        let preloadOk = false;
+
+        try {
+            await new Promise((resolve) => {
+                let resolved = false;
+                const done = () => {
+                    if (resolved) return;
+                    resolved = true;
+                    audio.removeEventListener('loadedmetadata', done);
+                    resolve();
+                };
+                if (audio.readyState >= 1) return done();
+                audio.addEventListener('loadedmetadata', done, { once: true });
+                setTimeout(done, 5000);
+            });
+
+            try {
+                if (isFinite(audio.duration) && audio.duration > 0) {
+                    const t = Math.min(targetTime, Math.max(0, audio.duration - 0.5));
+                    audio.currentTime = t;
+                } else {
+                    audio.currentTime = targetTime;
+                }
+            } catch (e) {}
+
+            preloadOk = await new Promise((resolve) => {
+                let resolved = false;
+                const ok = () => {
+                    if (resolved) return;
+                    resolved = true;
+                    audio.removeEventListener('canplay', ok);
+                    audio.removeEventListener('canplaythrough', ok);
+                    audio.removeEventListener('progress', onProgress);
+                    audio.removeEventListener('seeked', ok);
+                    resolve(true);
+                };
+                const onProgress = () => {
+                    const t = audio.currentTime || targetTime;
+                    const buf = audio.buffered;
+                    for (let i = 0; i < buf.length; i++) {
+                        if (buf.start(i) - 0.2 <= t && t <= buf.end(i) - 0.2) {
+                            ok();
+                            return;
+                        }
+                    }
+                };
+                audio.addEventListener('canplay', ok, { once: true });
+                audio.addEventListener('canplaythrough', ok, { once: true });
+                audio.addEventListener('seeked', ok, { once: true });
+                audio.addEventListener('progress', onProgress);
+                onProgress();
+                setTimeout(() => {
+                    if (resolved) return;
+                    resolved = true;
+                    audio.removeEventListener('canplay', ok);
+                    audio.removeEventListener('canplaythrough', ok);
+                    audio.removeEventListener('seeked', ok);
+                    audio.removeEventListener('progress', onProgress);
+                    resolve(audio.readyState >= 3);
+                }, 4000);
+            });
+        } catch (e) {
+            preloadOk = false;
+        }
+
+        if (!preloadOk) {
+            try {
+                audio.src = originalUri + "?ffmpeg";
+                this.isTranscoded = true;
+                this.loadedFromCache = false;
+                try { audio.currentTime = currentTime; } catch (e) {}
+                audio.volume = currentVolume;
+                if (shouldResume) {
+                    try { await audio.play(); } catch (e) {}
+                }
+                audio.ontimeupdate = () => this.updateTimeDisplay(audio);
+                if (title) title.textContent = this.currentPlayingName;
+                this._isSwitchingToCache = false;
+                setTimeout(() => this.startCacheProbe(originalUri), 3000);
+                return;
+            } catch (e) {
+                this._isSwitchingToCache = false;
+                return;
+            }
+        }
+
+        audio.volume = currentVolume;
+        this.isTranscoded = false;
+        this.loadedFromCache = true;
+
+        audio.ontimeupdate = () => this.updateTimeDisplay(audio);
+        audio.onended = () => {
+            if (this.cfg.loop_mode === 'single') {
+                audio.currentTime = 0
+                audio.play()
+            } else {
+                this.playNext()
+            }
+        };
+        audio.onpause = () => {
+            this.isPlaying = false
+            if (playPauseBtn) {
+                playPauseBtn.textContent = '❚❚'
+                playPauseBtn.classList.remove('playing')
+            }
+        };
+        audio.onplay = () => {
+            this.isPlaying = true
+            if (playPauseBtn) {
+                playPauseBtn.textContent = '➤'
+                playPauseBtn.classList.add('playing')
+            }
+        };
+        audio.onerror = async () => {
+            if (this._isSwitchingToCache) return;
+            this.loadedFromCache = false;
+            audio.src = originalUri + "?ffmpeg";
+            this.isTranscoded = true;
+            try { await audio.play(); } catch (e) {}
+        };
+
+        if (progressBar) progressBar.disabled = false;
+
+        if (shouldResume) {
+            try {
+                await audio.play();
+                this.isPlaying = true;
+                if (playPauseBtn) {
+                    playPauseBtn.textContent = '➤';
+                    playPauseBtn.classList.add('playing');
+                }
+            } catch (e) {}
+        }
+
+        if (title) title.textContent = this.currentPlayingName;
+        this.updateTimeDisplay(audio);
+        this._isSwitchingToCache = false;
     },
 
     async checkCachedVersion(originalUri) {
         if (!this.cfg.enable_lossless_and_cache) return null;
-        
         try {
             const decodedUri = decodeURIComponent(originalUri);
             const fileName = decodedUri.split('/').pop();
             const baseName = fileName.replace(/\.[^/.]+$/, "");
-            
             const baseUri = originalUri.replace(/\/[^/]+$/, '');
-            
-            const wavUri = `${baseUri}/cache/${encodeURIComponent(baseName)}.wav`;
-            const wavExists = await this.checkFileExists(wavUri);
-            if (wavExists) return { cachedUri: wavUri, originalUri };
-            
+            const candidates = [
+                `${baseUri}/cache/${baseName}.wav`,
+                `${baseUri}/cache/${encodeURIComponent(baseName)}.wav`,
+            ];
+            const unique = [...new Set(candidates)];
+            for (const wavUri of unique) {
+                const exists = await this.checkFileExists(wavUri);
+                if (exists) {
+                    return { cachedUri: wavUri, originalUri };
+                }
+            }
             return null;
         } catch (e) {
             return null;
@@ -2267,13 +1866,10 @@ const MMP = {
     setupAudioBindings() {
         const audio = this.audioElement;
         if (!audio) return;
-
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-            
             const playerVisible = document.getElementById('mmp-audio')?.style.display === 'flex';
             const isPlaying = this.isPlaying;
-            
             switch(e.key) {
                 case ' ':
                     if (playerVisible) {
@@ -2325,29 +1921,24 @@ const MMP = {
 
     playNext() {
         if (!this.playlist.length) return;
-        
         if (this.cfg.loop_mode === 'none' && this.index >= this.playlist.length - 1) {
             this.stop();
             return;
         }
-        
         if (this.shuffleEnabled) {
             this.index = this.getNextShuffleIndex();
         } else {
             this.index = (this.index + 1) % this.playlist.length;
         }
-        
         this.play(this.playlist[this.index]);
     },
 
     playPrev() {
         if (!this.playlist.length) return;
-        
         if (this.cfg.loop_mode === 'none' && this.index <= 0) {
             this.stop();
             return;
         }
-        
         if (this.shuffleEnabled) {
             let prevIndex;
             do {
@@ -2357,17 +1948,17 @@ const MMP = {
         } else {
             this.index = (this.index - 1 + this.playlist.length) % this.playlist.length;
         }
-        
         this.play(this.playlist[this.index]);
     },
 
     togglePlay() {
         const audio = this.audioElement;
         if (!audio) return;
-
         if (audio.paused) {
-            audio.play();
+            this._userWantsPlay = true;
+            audio.play().catch(() => {});
         } else {
+            this._userWantsPlay = false;
             audio.pause();
         }
     },
@@ -2375,20 +1966,18 @@ const MMP = {
     pause() {
         const audio = this.audioElement;
         if (!audio) return;
+        this._userWantsPlay = false;
         audio.pause();
     },
 
     adjustVolume(change) {
         const audio = this.audioElement;
         if (!audio) return;
-        
         let newVol = Math.round(audio.volume * 100) + change;
         newVol = Math.max(0, Math.min(100, newVol)) / 100;
-        
         audio.volume = newVol;
         this.cfg.audio_vol = newVol;
         localStorage.setItem('mmp_volume', newVol.toString());
-        
         const volDisplay = document.querySelector('.mmp-volume-value');
         if (volDisplay) volDisplay.textContent = `${Math.round(newVol * 100)}%`;
     },
@@ -2396,20 +1985,13 @@ const MMP = {
     stop() {
         const root = document.getElementById('mmp-audio');
         if (!root) return;
-
         const title = root.querySelector('.mmp-title');
         if (title && title.textContent && title.textContent.includes('Scanning')) {
             return;
         }
-
-        if (this.cacheProbeInterval) {
-            clearInterval(this.cacheProbeInterval);
-            this.cacheProbeInterval = null;
-        }
-
+        this._stopCacheProbe();
         const audio = this.audioElement;
         const bitrateDisplay = root.querySelector('.mmp-bitrate');
-
         root.style.display = 'none';
         if (audio) {
             audio.pause();
@@ -2419,9 +2001,7 @@ const MMP = {
             title.innerText = '';
             title.style.color = '';
         }
-        if (bitrateDisplay) {
-            bitrateDisplay.textContent = '';
-        }
+        if (bitrateDisplay) bitrateDisplay.textContent = '';
         this.isPlaying = false;
         this.isDragging = false;
         this.ffmpegAttempted = false;
@@ -2430,9 +2010,9 @@ const MMP = {
         this.currentPlayingUri = '';
         this.currentPlayingName = '';
         this._isSwitchingToCache = false;
+        this._userWantsPlay = false;
     },
 
-    // ========== 清理资源 ==========
     dispose() {
         this.cleanupPreactHijacker();
         if (this._hijackObserver) {
@@ -2443,16 +2023,12 @@ const MMP = {
             clearTimeout(this._hijackTimeoutId);
             this._hijackTimeoutId = null;
         }
-        if (this.cacheProbeInterval) {
-            clearInterval(this.cacheProbeInterval);
-            this.cacheProbeInterval = null;
-        }
+        this._stopCacheProbe();
     }
 }
 
 MMP.init();
 
-// 页面卸载时清理资源
 window.addEventListener('beforeunload', () => {
     MMP.dispose();
 });
