@@ -28,7 +28,7 @@ body:not(:has(.bottom-bar-stack #menu-panel)):not(:has(#paging)) .mmp {
 
 /* 情况2：只有 paging（没有底部 menu-panel） */
 body:has(#paging):not(:has(.bottom-bar-stack #menu-panel)) .mmp {
-    bottom: 24px;
+    bottom: 22px;
 }
 
 /* 情况3：只有底部 menu-panel（没有 paging） */
@@ -256,14 +256,14 @@ body:has(.bottom-bar-stack #menu-panel):has(#paging) .mmp {
 .mmp-progress-bar {
     position: relative;
     flex-grow: 1;
-    height: 0.5em !important;
+    height: 0.4em !important;
     cursor: pointer;
     background: var(--faint-contrast);
     border-radius: 0.25em;
     appearance: none;
     width: 100%;
     --thumb-color: var(--text);
-    margin-bottom: 10px;
+    margin-bottom: 9px;
 }
 
 .mmp-progress-bar:disabled {
@@ -274,8 +274,8 @@ body:has(.bottom-bar-stack #menu-panel):has(#paging) .mmp {
 
 .mmp-progress-bar::-webkit-slider-thumb {
     appearance: none;
-    width: 0.3em;
-    height: 1.9em;
+    width: 0.2em;
+    height: 1.6em;
     background: var(--faint-contrast);
     cursor: pointer;
     border-radius: 0;
@@ -283,8 +283,8 @@ body:has(.bottom-bar-stack #menu-panel):has(#paging) .mmp {
 }
 
 .mmp-progress-bar::-moz-range-thumb {
-    width: 0.3em;
-    height: 1.9em;
+    width: 0.2em;
+    height: 1.6em;
     background: var(--faint-contrast);
     cursor: pointer;
     border-radius: 0;
@@ -292,14 +292,14 @@ body:has(.bottom-bar-stack #menu-panel):has(#paging) .mmp {
 }
 
 .mmp-progress-bar:hover::-webkit-slider-thumb {
-    width: 0.3em;
-    height: 1.9em;
+    width: 0.2em;
+    height: 1.6em;
     background: var(--text);
 }
 
 .mmp-progress-bar:hover::-moz-range-thumb {
-    width: 0.3em;
-    height: 1.9em;
+    width: 0.2em;
+    height: 1.6em;
     background: var(--text);
 }
 
