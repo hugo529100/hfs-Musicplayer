@@ -1,5 +1,5 @@
 exports.description = "A clean and pure music player with high-resolution audio support"
-exports.version = 8.2
+exports.version = 8.3
 exports.apiRequired = 9.5
 exports.repo = "Hug3O/Musicplayer+"
 exports.frontend_css = "style.css"

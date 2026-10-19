@@ -13,7 +13,7 @@ const isLocalStorageSupported = () => {
 };
 
 const getShuffleState = () => {
-  if (!isLocalStorageSupported()) return true;
+  if (!isLocalStorageSupported()) return false;
   const val = localStorage.getItem(SHUFFLE_STORAGE_KEY);
   return val === null ? true : val === 'true';
 };
