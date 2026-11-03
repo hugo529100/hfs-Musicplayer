@@ -25,22 +25,33 @@ exports.config = {
         showIf: x => x.config_tab === 'playback',
         frontend: true,
         label: "Auto play when clicking audio files",
+        helperText: "Click an audio file to play it directly. Independent from the file-menu entries below.",
         type: 'boolean',
         defaultValue: true
+    },
+    use_file_menu_folder: {
+        showIf: x => x.config_tab === 'playback',
+        frontend: true,
+        label: "Show 'Play with Musicplayer+' for folders in file menu",
+        helperText: "Show the 'Play with Musicplayer+' entry when right-clicking a folder. Independent from the audio-file entry above.",
+        type: 'boolean',
+        defaultValue: true
+    },
+    use_file_menu_file: {
+        showIf: x => x.config_tab === 'playback',
+        frontend: true,
+        label: "Show 'Play with Musicplayer+' for audio files in file menu",
+        helperText: "Show the 'Play with Musicplayer+' entry when right-clicking an audio file. Independent from the folder entry below.",
+        type: 'boolean',
+        defaultValue: false
     },
     use_file_list: {
         showIf: x => x.config_tab === 'playback',
         frontend: true,
-        label: "Show play button in the file list",
+        label: "Show 'Play audio' button (➤) in file list",
+        helperText: "Show a 'Play audio' button on each audio file row in the file list.",
         type: 'boolean',
         defaultValue: false
-    },
-    use_file_menu: {
-        showIf: x => x.config_tab === 'playback',
-        frontend: true,
-        label: "Show play button under the file menu",
-        type: 'boolean',
-        defaultValue: true
     },
     audio_vol: {
         showIf: x => x.config_tab === 'playback',
@@ -173,6 +184,7 @@ exports.config = {
 exports.configDialog = { maxWidth: '55em' }
 
 exports.changelog = [
+    { version: 8.3, message: "Split file-menu entries: audio files and folders have independent toggles" },
     { version: 8.0, message: "Bypass koa response handling: use ctx.respond=false + ctx.res directly" },
     { version: 7.9, message: "Attempt to strip Range header for ?ffmpeg requests" },
     { version: 7.8, message: "Switch stream format to AAC (ADTS)" },

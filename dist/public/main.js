@@ -27,21 +27,26 @@ const setShuffleState = (value) => {
 const isAppleDevice = /iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent) && !window.MSStream
 const unsupportedPlugin = HFS.plugins['unsupported-videos'] || HFS.plugins['unsupported-videos']
 
-if (cfg.use_file_menu) {
+// ================================================================
+// ========== 文件菜单: 音频文件 / 文件夹 各自独立开关 ==========
+// ================================================================
+if (cfg.use_file_menu_file || cfg.use_file_menu_folder) {
     HFS.onEvent('fileMenu', ({ entry }) => {
         if (entry.isFolder) {
+            if (!cfg.use_file_menu_folder) return null
             return {
                 id: 'mmp-play-folder',
                 icon: 'play',
-                label: t`Play with Musicplayer+`,
+                label: t`Play with Musicplayer`,
                 onClick: () => MMP.playFolder(entry)
             }
         }
         if (MMP.audio_formats.test(entry.uri)) {
+            if (!cfg.use_file_menu_file) return null
             return {
                 id: 'mmp-play-file',
                 icon: 'play',
-                label: t`Play audio`,
+                label: t`Play with Musicplayer+`,
                 onClick: () => MMP.audio(entry)
             }
         }
@@ -49,6 +54,9 @@ if (cfg.use_file_menu) {
     })
 }
 
+// ================================================================
+// ========== 文件列表: "Play audio" (➤) ==========
+// ================================================================
 if (cfg.use_file_list) {
     HFS.onEvent('afterEntryName', ({ entry }, { setOrder }) => {
         setOrder(-1)
@@ -56,7 +64,7 @@ if (cfg.use_file_list) {
             return h('button', {
                 className: 'mmp-play',
                 onClick: () => MMP.audio(entry),
-                title: "Play"
+                title: "Play audio"
             }, '➤')
         }
     })
@@ -540,7 +548,6 @@ const MMP = {
     // ========== File Menu 打开逻辑(支持懒加载列表) ==========
     // ================================================================
 
-    // 在 DOM 中按文件名查找链接元素
     findLinkByName(fileName) {
         if (!fileName) return null;
         const links = document.querySelectorAll('li.file a[href]');
@@ -559,11 +566,9 @@ const MMP = {
         return fallback;
     },
 
-    // 让列表滚动/翻页,尝试把目标文件加载进 DOM
     async ensureFileVisible(fileName, maxSteps = 80) {
         if (this.findLinkByName(fileName)) return true;
 
-        // 常见的滚动容器候选
         const candidates = [
             document.querySelector('.list-wrapper'),
             document.querySelector('.file-list'),
@@ -574,7 +579,6 @@ const MMP = {
             document.body
         ].filter(Boolean);
 
-        // 选出真正可滚动的容器
         const scrollers = candidates.filter(el => el.scrollHeight > el.clientHeight + 10);
 
         if (scrollers.length === 0) {
@@ -585,14 +589,12 @@ const MMP = {
         let stuck = 0;
 
         for (let step = 0; step < maxSteps; step++) {
-            // 对每个可滚动容器都尝试滚到底部,触发懒加载
             for (const scroller of scrollers) {
                 scroller.scrollTop = scroller.scrollHeight;
                 scroller.dispatchEvent(new Event('scroll', { bubbles: true }));
             }
             window.dispatchEvent(new Event('scroll'));
 
-            // 等待懒加载渲染
             await new Promise(r => setTimeout(r, 120));
 
             if (this.findLinkByName(fileName)) {
@@ -607,7 +609,7 @@ const MMP = {
             const count = document.querySelectorAll('li.file').length;
             if (count === lastCount) {
                 stuck++;
-                if (stuck > 4) break; // 连续多次没有新内容,放弃
+                if (stuck > 4) break;
             } else {
                 stuck = 0;
                 lastCount = count;
@@ -635,10 +637,8 @@ const MMP = {
             return false;
         }
 
-        // 1) 先在 DOM 里找
         let targetLink = this.findLinkByName(fileName);
 
-        // 2) 没找到,尝试滚动/翻页让列表加载该文件
         if (!targetLink) {
             const titleEl = document.querySelector('.mmp-title');
             const originalTitle = titleEl?.textContent;
@@ -1604,7 +1604,6 @@ const MMP = {
             if (self.loadedFromCache) { self._stopCacheProbe(); return; }
             if (self.currentPlayingUri !== originalUri) { self._stopCacheProbe(); return; }
 
-            // 超过 5 分钟,停止探测
             if (Date.now() - startTime > PROBE_MAX_DURATION) {
                 self._stopCacheProbe();
                 return;
@@ -1621,11 +1620,9 @@ const MMP = {
                 }
             } catch (e) {}
 
-            // 未命中,10 秒后继续
             self._cacheProbeTimer = setTimeout(trySwitch, PROBE_INTERVAL);
         };
 
-        // 立即探测一次
         trySwitch();
     },
 
