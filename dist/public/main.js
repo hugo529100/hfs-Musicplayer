@@ -336,9 +336,19 @@ const MMP = {
     },
 
     async init() {
-        const savedVol = localStorage.getItem('mmp_volume')
-        if (savedVol) this.cfg.audio_vol = parseFloat(savedVol)
-        
+        // ===== 音量控件开关处理 =====
+        const showVolume = this.cfg.show_volume_control !== false
+        if (!showVolume) {
+            // 手动关闭音量控件 -> 强制 100%，并清理保存的音量
+            this.cfg.audio_vol = 1.0
+            if (isLocalStorageSupported()) localStorage.removeItem('mmp_volume')
+        } else {
+            if (isLocalStorageSupported()) {
+                const savedVol = localStorage.getItem('mmp_volume')
+                if (savedVol) this.cfg.audio_vol = parseFloat(savedVol)
+            }
+        }
+
         if (this.cfg.enable_cache) this.restoreCachedPlaylists()
         if (this.cfg.enable_cache) await this.initIndexedDB()
         
@@ -363,6 +373,17 @@ const MMP = {
             HFS.onEvent('configChanged', (newCfg) => {
                 this.cfg = { ...this.cfg, ...newCfg }
                 document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
+
+                // 音量控件显隐同步
+                if (this.cfg.show_volume_control === false) {
+                    this.cfg.audio_vol = 1.0
+                    if (isLocalStorageSupported()) localStorage.removeItem('mmp_volume')
+                    if (this.audioElement) this.audioElement.volume = 1.0
+                }
+                const vc = document.querySelector('.mmp-volume-control')
+                if (vc) vc.style.display = (this.cfg.show_volume_control === false) ? 'none' : ''
+                const vm = document.querySelector('.mmp-volume-value')
+                if (vm && this.cfg.show_volume_control === false) vm.textContent = '100%'
             })
             
             HFS.onEvent('afterList', () => {
@@ -713,6 +734,8 @@ const MMP = {
         const closeBtn = headerControls.querySelector('.mmp-close');
         if (volumeControl && closeBtn) {
             headerControls.insertBefore(fileMenuBtn, closeBtn);
+        } else if (closeBtn) {
+            headerControls.insertBefore(fileMenuBtn, closeBtn);
         } else {
             headerControls.appendChild(fileMenuBtn);
         }
@@ -964,6 +987,16 @@ const MMP = {
 
     initPlayerElement() {
         document.documentElement.style.setProperty('--mmp-custom-height', this.cfg.button_height || '4vw')
+
+        const showVolume = this.cfg.show_volume_control !== false
+        const volumeHTML = showVolume
+            ? `<div class='mmp-volume-control'>
+                   <button type="button" class='mmp-vol-down' title="Decrease volume">−</button>
+                   <span class='mmp-volume-value'>${Math.round(this.cfg.audio_vol * 100)}%</span>
+                   <button type="button" class='mmp-vol-up' title="Increase volume">+</button>
+               </div>`
+            : ''
+
         const progressHTML = `
             <div class='mmp-progress-container'>
                 <input type="range" class='mmp-progress-bar' min="0" max="10000" value="0" step="1">
@@ -981,11 +1014,7 @@ const MMP = {
                 </div>
                 <div class='mmp-header-controls'>
                     <button type="button" class='mmp-shuffle-btn' title="Shuffle">${this.shuffleEnabled ? '⋈' : '⇌'}</button>
-                    <div class='mmp-volume-control'>
-                        <button type="button" class='mmp-vol-down' title="Decrease volume">−</button>
-                        <span class='mmp-volume-value'>${Math.round(this.cfg.audio_vol * 100)}%</span>
-                        <button type="button" class='mmp-vol-up' title="Increase volume">+</button>
-                    </div>
+                    ${volumeHTML}
                     <button type="button" class='mmp-close' title="Close">✕</button>
                 </div>
             </div>
@@ -1391,9 +1420,11 @@ const MMP = {
             }
         }
         
-        audio.volume = this.cfg.audio_vol
+        // ===== 音量：若关闭控件，强制 100% =====
+        const effectiveVolume = this.cfg.show_volume_control === false ? 1.0 : this.cfg.audio_vol
+        audio.volume = effectiveVolume
         const volDisplay = document.querySelector('.mmp-volume-value')
-        if (volDisplay) volDisplay.textContent = `${Math.round(this.cfg.audio_vol * 100)}%`
+        if (volDisplay) volDisplay.textContent = `${Math.round(effectiveVolume * 100)}%`
 
         audio.onended = () => {
             if (this.cfg.loop_mode === 'single') {
@@ -1968,13 +1999,15 @@ const MMP = {
     },
 
     adjustVolume(change) {
+        // 音量控件关闭时忽略键盘/按钮调音量
+        if (this.cfg.show_volume_control === false) return;
         const audio = this.audioElement;
         if (!audio) return;
         let newVol = Math.round(audio.volume * 100) + change;
         newVol = Math.max(0, Math.min(100, newVol)) / 100;
         audio.volume = newVol;
         this.cfg.audio_vol = newVol;
-        localStorage.setItem('mmp_volume', newVol.toString());
+        if (isLocalStorageSupported()) localStorage.setItem('mmp_volume', newVol.toString());
         const volDisplay = document.querySelector('.mmp-volume-value');
         if (volDisplay) volDisplay.textContent = `${Math.round(newVol * 100)}%`;
     },

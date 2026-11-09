@@ -1,5 +1,5 @@
 exports.description = "A clean and pure music player with high-resolution audio support"
-exports.version = 8.3
+exports.version = 8.5
 exports.apiRequired = 9.5
 exports.repo = "Hug3O/Musicplayer+"
 exports.frontend_css = "style.css"
@@ -53,17 +53,6 @@ exports.config = {
         type: 'boolean',
         defaultValue: false
     },
-    audio_vol: {
-        showIf: x => x.config_tab === 'playback',
-        frontend: true,
-        label: "Audio volume",
-        helperText: "0.0 to 1.0",
-        type: 'number',
-        min: 0.0,
-        max: 1.0,
-        defaultValue: 1.0,
-        placeholder: "default: 0.95"
-    },
 
     button_height: {
         showIf: x => x.config_tab === 'ui',
@@ -73,6 +62,25 @@ exports.config = {
         type: 'string',
         defaultValue: '6vw',
         placeholder: "default: 4vw"
+    },
+    show_volume_control: {
+        showIf: x => x.config_tab === 'ui',
+        frontend: true,
+        label: "Show volume control",
+        helperText: "If disabled, the volume control is hidden and volume is fixed at 100%.",
+        type: 'boolean',
+        defaultValue: true
+    },
+    audio_vol: {
+        showIf: x => x.config_tab === 'ui',
+        frontend: true,
+        label: "Audio volume",
+        helperText: "0.0 to 1.0",
+        type: 'number',
+        min: 0.0,
+        max: 1.0,
+        defaultValue: 1.0,
+        placeholder: "default: 0.95"
     },
     show_bitrate: {
         showIf: x => x.config_tab === 'ui',
@@ -184,6 +192,7 @@ exports.config = {
 exports.configDialog = { maxWidth: '55em' }
 
 exports.changelog = [
+    { version: 8.4, message: "Add 'Show volume control' option (default on); when off, volume is fixed at 100%" },
     { version: 8.3, message: "Split file-menu entries: audio files and folders have independent toggles" },
     { version: 8.0, message: "Bypass koa response handling: use ctx.respond=false + ctx.res directly" },
     { version: 7.9, message: "Attempt to strip Range header for ?ffmpeg requests" },
