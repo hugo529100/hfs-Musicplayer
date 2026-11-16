@@ -1,5 +1,5 @@
 exports.description = "A clean and pure music player with high-resolution audio support"
-exports.version = 8.5
+exports.version = 8.6
 exports.apiRequired = 9.5
 exports.repo = "Hug3O/Musicplayer+"
 exports.frontend_css = "style.css"
@@ -69,7 +69,7 @@ exports.config = {
         label: "Show volume control",
         helperText: "If disabled, the volume control is hidden and volume is fixed at 100%.",
         type: 'boolean',
-        defaultValue: true
+        defaultValue: false
     },
     audio_vol: {
         showIf: x => x.config_tab === 'ui',

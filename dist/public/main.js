@@ -117,6 +117,8 @@ const MMP = {
     _cacheProbeTimer: null,
     _cacheProbeAttempts: 0,
     _cacheProbeStartTime: 0,
+    _bitrateResizeObserver: null,
+    _bitrateCheckRaf: null,
 
     checkAudioInCurrentList() {
         const fileItems = document.querySelectorAll('li.file');
@@ -384,6 +386,9 @@ const MMP = {
                 if (vc) vc.style.display = (this.cfg.show_volume_control === false) ? 'none' : ''
                 const vm = document.querySelector('.mmp-volume-value')
                 if (vm && this.cfg.show_volume_control === false) vm.textContent = '100%'
+
+                // 配置变更后重新检测比特率碰撞
+                requestAnimationFrame(() => this.checkBitrateCollision())
             })
             
             HFS.onEvent('afterList', () => {
@@ -427,6 +432,8 @@ const MMP = {
                         }
                     }, 1500);
                 }
+                // 列表刷新可能改变容器宽度，重新检测
+                requestAnimationFrame(() => this.checkBitrateCollision())
             })
 
             if (this.cfg.enable_cache) {
@@ -1003,6 +1010,7 @@ const MMP = {
                 <div class='mmp-loading-indicator'></div>
             </div>`
         const bitrateHTML = this.cfg.show_bitrate ? `<span class='mmp-bitrate'></span>` : ''
+        // 注意：音量控制模块在前，播放顺序切换按钮在后（左右对调）
         const playerHTML = `
         <div id='mmp-audio' class='mmp' style='display:none'>
             <audio class='mmp-media'></audio>
@@ -1013,8 +1021,8 @@ const MMP = {
                     <div class='mmp-title'></div>
                 </div>
                 <div class='mmp-header-controls'>
-                    <button type="button" class='mmp-shuffle-btn' title="Shuffle">${this.shuffleEnabled ? '⋈' : '⇌'}</button>
                     ${volumeHTML}
+                    <button type="button" class='mmp-shuffle-btn' title="Shuffle">${this.shuffleEnabled ? '⋈' : '⇌'}</button>
                     <button type="button" class='mmp-close' title="Close">✕</button>
                 </div>
             </div>
@@ -1097,6 +1105,70 @@ const MMP = {
             if (audio) {
                 audio.ontimeupdate = () => this.updateTimeDisplay(audio)
             }
+        }
+
+        // ===== 监听容器/标题尺寸变化，动态判断比特率是否与标题碰撞 =====
+        const rootEl = document.getElementById('mmp-audio')
+        const titleContainerEl = rootEl?.querySelector('.mmp-title-container')
+        if (window.ResizeObserver && rootEl) {
+            const ro = new ResizeObserver(() => {
+                if (this._bitrateCheckRaf) cancelAnimationFrame(this._bitrateCheckRaf)
+                this._bitrateCheckRaf = requestAnimationFrame(() => {
+                    this._bitrateCheckRaf = null
+                    this.checkBitrateCollision()
+                })
+            })
+            ro.observe(rootEl)
+            if (titleContainerEl) ro.observe(titleContainerEl)
+            this._bitrateResizeObserver = ro
+        }
+        // 首次 + 字体/布局稳定后各检查一次
+        setTimeout(() => this.checkBitrateCollision(), 50)
+        setTimeout(() => this.checkBitrateCollision(), 300)
+    },
+
+    // 检测标题是否已触碰到比特率，若是则隐藏比特率；空间恢复后自动显示
+    checkBitrateCollision() {
+        const root = document.getElementById('mmp-audio')
+        if (!root || root.style.display === 'none') return
+        const bitrate = root.querySelector('.mmp-bitrate')
+        const titleContainer = root.querySelector('.mmp-title-container')
+        const title = root.querySelector('.mmp-title')
+        if (!bitrate || !titleContainer || !title) return
+
+        // 竖屏下已由 CSS 无条件隐藏，无需再做 JS 检测
+        if (window.matchMedia('(orientation: portrait)').matches) {
+            root.classList.remove('mmp-hide-bitrate')
+            return
+        }
+
+        const wasHidden = root.classList.contains('mmp-hide-bitrate')
+        // 先临时移除隐藏 class，测量自然布局
+        if (wasHidden) root.classList.remove('mmp-hide-bitrate')
+
+        // 若 bitrate 本身被 CSS（如 display:none 的其它规则）隐藏，则无需处理
+        const bitrateCS = getComputedStyle(bitrate)
+        if (bitrateCS.display === 'none') return
+
+        const bitrateRect = bitrate.getBoundingClientRect()
+        const titleRect = title.getBoundingClientRect()
+
+        let collide = false
+        if (bitrateRect.width > 0 && bitrateRect.height > 0) {
+            // 标题实际渲染框左边缘越过 bitrate 右边缘 => 触碰（留 2px 容差）
+            collide = titleRect.left < bitrateRect.right - 2
+        }
+
+        // 辅助条件：标题已被 ellipsis 截断，且与 bitrate 很近（4px 内）也视为触碰
+        const truncated = title.scrollWidth > title.clientWidth + 1
+        if (!collide && truncated && bitrateRect.width > 0) {
+            if (titleRect.left < bitrateRect.right + 4) collide = true
+        }
+
+        if (collide) {
+            root.classList.add('mmp-hide-bitrate')
+        } else if (wasHidden) {
+            root.classList.remove('mmp-hide-bitrate')
         }
     },
 
@@ -1236,6 +1308,8 @@ const MMP = {
             title.style.textOverflow = 'ellipsis'
             title.style.color = ''
         }
+        // 标题变化后重新检测是否与比特率碰撞
+        requestAnimationFrame(() => this.checkBitrateCollision())
 
         const cachedBitrate = this.bitrateCache.get(entry.uri)
         if (cachedBitrate) {
@@ -2032,6 +2106,8 @@ const MMP = {
             title.style.color = '';
         }
         if (bitrateDisplay) bitrateDisplay.textContent = '';
+        // 关闭时清理碰撞隐藏状态
+        root.classList.remove('mmp-hide-bitrate');
         this.isPlaying = false;
         this.isDragging = false;
         this.ffmpegAttempted = false;
@@ -2052,6 +2128,14 @@ const MMP = {
         if (this._hijackTimeoutId) {
             clearTimeout(this._hijackTimeoutId);
             this._hijackTimeoutId = null;
+        }
+        if (this._bitrateResizeObserver) {
+            this._bitrateResizeObserver.disconnect();
+            this._bitrateResizeObserver = null;
+        }
+        if (this._bitrateCheckRaf) {
+            cancelAnimationFrame(this._bitrateCheckRaf);
+            this._bitrateCheckRaf = null;
         }
         this._stopCacheProbe();
     }

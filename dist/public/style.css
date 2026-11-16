@@ -432,8 +432,9 @@ button.mmp-play {
         min-width: 4.5em;
         min-height: 1.6em;
     }
+    /* 竖屏下始终隐藏 bitrate，保持简约，避免长文件名挤占 */
     .mmp-bitrate {
-        display: none; 
+        display: none !important;
     }
     .mmp-title {
         text-align: center;
@@ -473,12 +474,6 @@ button.mmp-play {
     .mmp-header-controls {
         position: absolute;
         right: 0.5em;
-    }
-}
-
-@media (max-width: 600px) {
-    .mmp-bitrate {
-        display: none;
     }
 }
 
@@ -523,4 +518,11 @@ button.mmp-play {
 .mmp-play-pause.playing:hover {
     background-color: var(--text);
     color: var(--bg);
+}
+
+/* ================================================================
+   文件名触碰到比特率时（由 JS 动态加 class）隐藏比特率
+   ================================================================ */
+.mmp.mmp-hide-bitrate .mmp-bitrate {
+    display: none;
 }
