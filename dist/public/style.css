@@ -526,3 +526,42 @@ button.mmp-play {
 .mmp.mmp-hide-bitrate .mmp-bitrate {
     display: none;
 }
+
+/* ================================================================
+   側邊面板避讓（左：Tree-nav 的 Folders；右：Notes）
+   ----------------------------------------------------------------
+   Tree-nav 與 Notes 各自都有 #mmp-audio 的 left/right 規則，但兩者
+   優先級相同，且都會把 left 設為 0；Notes 的樣式較晚載入，會蓋掉
+   Tree-nav 的 left，導致播放器壓在左側樹面板下面。這裡用稍高的
+   優先級（html body …）把左右內縮一起宣告，作為 CSS 後備；
+   main.js 也會依面板實際寬度寫入 inline style，兩者相輔相成。
+   ================================================================ */
+@media (orientation: landscape) and (min-width: 769px) {
+    /* 只有左側樹打開 */
+    html body.hfs-tree-layout.hfs-tree-open #mmp-audio {
+        left: var(--tree-width, 0px);
+        right: 0;
+        width: auto;
+    }
+
+    /* 只有右側 Notes 打開 */
+    html body.note-panel-layout.note-panel-open #mmp-audio {
+        right: var(--note-panel-width, 0px);
+        width: auto;
+    }
+
+    /* 兩側同時打開：左右都內縮，不再互相覆蓋 */
+    html body.hfs-tree-layout.hfs-tree-open.note-panel-layout.note-panel-open #mmp-audio {
+        left: var(--tree-width, 0px);
+        right: var(--note-panel-width, 0px);
+        width: auto;
+    }
+}
+
+/* 平板直向：Notes 仍是右側欄，Folders 則在上方，只需避讓右側 */
+@media (orientation: portrait) and (min-width: 769px) {
+    html body.note-panel-layout.note-panel-open #mmp-audio {
+        right: var(--note-panel-width, 0px);
+        width: auto;
+    }
+}

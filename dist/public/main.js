@@ -119,6 +119,12 @@ const MMP = {
     _cacheProbeStartTime: 0,
     _bitrateResizeObserver: null,
     _bitrateCheckRaf: null,
+    _layoutSetup: false,
+    _layoutSyncRaf: null,
+    _layoutMutationObserver: null,
+    _layoutResizeObserver: null,
+    _observedLayoutPanels: [],
+    _layoutWindowListeners: [],
 
     checkAudioInCurrentList() {
         const fileItems = document.querySelectorAll('li.file');
@@ -394,6 +400,7 @@ const MMP = {
             HFS.onEvent('afterList', () => {
                 if (this.isPlaying) {
                     document.getElementById('mmp-audio').style.display = 'flex'
+                    this.schedulePlayerLayout()
                 }
                 if (cfg.auto_play) {
                     this.hijackAllIcons();
@@ -1125,6 +1132,126 @@ const MMP = {
         // 首次 + 字体/布局稳定后各检查一次
         setTimeout(() => this.checkBitrateCollision(), 50)
         setTimeout(() => this.checkBitrateCollision(), 300)
+
+        this.setupPlayerLayout()
+    },
+
+    // ===== 侧边面板避让（左侧 Folders 树 / 右侧 Notes） =====
+    // Tree-nav 和 Notes 各自也会写 #mmp-audio 的 left/right，但两者的规则
+    // 优先级相同且都会把 left 固定为 0，后加载的 Notes 会覆盖 Tree-nav，
+    // 结果播放器仍然压在左侧树面板下面。这里由播放器自己根据面板实际宽度
+    // 计算内缩量并写成 inline style，确保两个面板同时打开时也正确。
+    setupPlayerLayout() {
+        if (this._layoutSetup) return;
+        this._layoutSetup = true;
+
+        const schedule = () => this.schedulePlayerLayout();
+        window.addEventListener('resize', schedule);
+        window.addEventListener('orientationchange', schedule);
+        this._layoutWindowListeners = [['resize', schedule], ['orientationchange', schedule]];
+
+        if (window.MutationObserver) {
+            this._layoutMutationObserver = new MutationObserver(() => schedule());
+            this._layoutMutationObserver.observe(document.body, {
+                attributes: true,
+                attributeFilter: ['class', 'style'],
+                childList: true
+            });
+        }
+
+        this.syncPlayerLayout();
+        // 面板可能比播放器晚挂载，补几次同步
+        [80, 300, 800, 1600, 3000].forEach(delay => {
+            setTimeout(() => this.syncPlayerLayout(), delay);
+        });
+    },
+
+    schedulePlayerLayout() {
+        if (this._layoutSyncRaf) return;
+        this._layoutSyncRaf = requestAnimationFrame(() => {
+            this._layoutSyncRaf = null;
+            this.syncPlayerLayout();
+        });
+    },
+
+    // 监听面板尺寸变化（拖拽分隔条时能实时跟随）
+    _observeLayoutPanels() {
+        if (!window.ResizeObserver) return;
+        if (!this._layoutResizeObserver) {
+            this._layoutResizeObserver = new ResizeObserver(() => this.schedulePlayerLayout());
+        }
+        const next = [
+            document.querySelector('.hfs-tree-nav'),
+            document.querySelector('.note-panel')
+        ].filter(Boolean);
+        const prev = this._observedLayoutPanels || [];
+        for (const el of prev) {
+            if (!next.includes(el)) {
+                try { this._layoutResizeObserver.unobserve(el); } catch (e) {}
+            }
+        }
+        for (const el of next) {
+            if (!prev.includes(el)) {
+                try { this._layoutResizeObserver.observe(el); } catch (e) {}
+            }
+        }
+        this._observedLayoutPanels = next;
+    },
+
+    syncPlayerLayout() {
+        const root = document.getElementById('mmp-audio');
+        if (!root) return;
+        this._observeLayoutPanels();
+
+        const vw = document.documentElement.clientWidth || window.innerWidth || 0;
+        if (!vw) return;
+
+        let left = 0;
+        let right = 0;
+
+        // 左侧 Folders 树：仅横屏时是左侧栏（竖屏时它是顶部栏）
+        if (document.body.classList.contains('hfs-tree-open') &&
+            window.matchMedia('(orientation: landscape)').matches) {
+            const nav = document.querySelector('.hfs-tree-nav');
+            if (nav && nav.offsetWidth > 0) left = nav.offsetWidth;
+        }
+
+        // 右侧 Notes：note-desktop 是右側欄；note-mobile / 全屏时不内缩
+        if (document.body.classList.contains('note-panel-open')) {
+            const panel = document.querySelector('.note-panel');
+            if (panel &&
+                !panel.classList.contains('note-fullscreen') &&
+                !panel.classList.contains('note-mobile')) {
+                const w = panel.offsetWidth;
+                if (w > 0 && w < vw) right = w;
+            }
+        }
+
+        // 右侧 QuickPages：與 Notes 共用右側區域（兩者互斥）
+        if (document.body.classList.contains('qp-panel-open')) {
+            const qpPanel = document.querySelector('.qp-panel');
+            if (qpPanel &&
+                !qpPanel.classList.contains('qp-mobile') &&
+                !qpPanel.classList.contains('qp-fullscreen')) {
+                const qpWidth = qpPanel.offsetWidth;
+                if (qpWidth > 0 && qpWidth < vw) right = Math.max(right, qpWidth);
+            }
+        }
+
+        left = Math.max(0, Math.min(left, vw));
+        right = Math.max(0, Math.min(right, vw));
+
+        // 只有兩側面板寬度加起來超過視窗時才按比例壓縮，
+        // 避免播放器出現負寬度（正常情況下絕不與面板重疊）
+        if (left + right > vw - 2 && left + right > 0) {
+            const scale = Math.max(0, (vw - 2) / (left + right));
+            left = Math.floor(left * scale);
+            right = Math.floor(right * scale);
+        }
+
+        root.style.left = left + 'px';
+        root.style.right = right + 'px';
+        root.style.width = 'auto';
     },
 
     // 检测标题是否已触碰到比特率，若是则隐藏比特率；空间恢复后自动显示
@@ -1280,6 +1407,7 @@ const MMP = {
         const bitrateDisplay = root.querySelector('.mmp-bitrate')
 
         root.style.display = 'flex'
+        this.schedulePlayerLayout()
         this.isTranscoded = false
         this.loadedFromCache = false
         this.updateLoadingProgress(0)
@@ -2137,6 +2265,23 @@ const MMP = {
             cancelAnimationFrame(this._bitrateCheckRaf);
             this._bitrateCheckRaf = null;
         }
+        if (this._layoutMutationObserver) {
+            this._layoutMutationObserver.disconnect();
+            this._layoutMutationObserver = null;
+        }
+        if (this._layoutResizeObserver) {
+            this._layoutResizeObserver.disconnect();
+            this._layoutResizeObserver = null;
+        }
+        this._observedLayoutPanels = [];
+        if (this._layoutSyncRaf) {
+            cancelAnimationFrame(this._layoutSyncRaf);
+            this._layoutSyncRaf = null;
+        }
+        for (const [evt, fn] of this._layoutWindowListeners) {
+            window.removeEventListener(evt, fn);
+        }
+        this._layoutWindowListeners = [];
         this._stopCacheProbe();
     }
 }
