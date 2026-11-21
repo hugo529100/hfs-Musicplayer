@@ -24,6 +24,59 @@ const setShuffleState = (value) => {
   }
 };
 
+// ================================================================
+// ========== 播放器位置（頂置 / 底置），存於頁面 localStorage ==========
+// ========== 橫屏（landscape）與豎屏（portrait）分開貯存 ==========
+// ================================================================
+const PLAYER_POSITION_KEYS = {
+    landscape: 'mmp_player_position_landscape',
+    portrait: 'mmp_player_position_portrait'
+}
+// 舊版單一 key，只在第一次升級時拿來初始化兩個方向
+const LEGACY_PLAYER_POSITION_KEY = 'mmp_player_position'
+// 箭頭都加上 \uFE0E（text presentation selector），避免被系統當成彩色 emoji
+const ICON_DOCK_TOP = '\u2636\uFE0E'      // ☶ 移到頂部
+const ICON_DOCK_BOTTOM = '\u2633\uFE0E'   // ☳ 移到底部
+
+const currentOrientation = () => {
+  try {
+    return window.matchMedia && window.matchMedia('(orientation: landscape)').matches
+      ? 'landscape'
+      : 'portrait'
+  } catch (e) {
+    return 'portrait'
+  }
+}
+
+const getPlayerPosition = (orientation = currentOrientation()) => {
+  try {
+    if (!isLocalStorageSupported()) return 'bottom'
+    const key = PLAYER_POSITION_KEYS[orientation] || PLAYER_POSITION_KEYS.portrait
+    const landscapeValue = localStorage.getItem(PLAYER_POSITION_KEYS.landscape)
+    const portraitValue = localStorage.getItem(PLAYER_POSITION_KEYS.portrait)
+    let value = orientation === 'landscape' ? landscapeValue : portraitValue
+    // 只有兩個新 key 都不存在時（第一次升級）才讀舊版單一 key
+    if (value === null && landscapeValue === null && portraitValue === null) {
+        value = localStorage.getItem(LEGACY_PLAYER_POSITION_KEY)
+    }
+    return value === 'top' ? 'top' : 'bottom'
+  } catch (e) {
+    return 'bottom'
+  }
+}
+
+// 把舊版單一設定複製到兩個方向（只補不覆蓋），避免升級後設定消失
+const migrateLegacyPlayerPosition = () => {
+  try {
+    if (!isLocalStorageSupported()) return
+    const legacy = localStorage.getItem(LEGACY_PLAYER_POSITION_KEY)
+    if (legacy !== 'top' && legacy !== 'bottom') return
+    Object.values(PLAYER_POSITION_KEYS).forEach(key => {
+      if (localStorage.getItem(key) === null) localStorage.setItem(key, legacy)
+    })
+  } catch (e) {}
+}
+
 const isAppleDevice = /iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent) && !window.MSStream
 const unsupportedPlugin = HFS.plugins['unsupported-videos'] || HFS.plugins['unsupported-videos']
 
@@ -70,6 +123,7 @@ if (cfg.use_file_list) {
     })
 }
 
+migrateLegacyPlayerPosition()
 
 const MMP = {
     cfg,
@@ -103,6 +157,7 @@ const MMP = {
     currentBitrate: 0,
     bitrateCache: new Map(),
     shuffleEnabled: getShuffleState(),
+    position: getPlayerPosition(),
     originalPlaylistOrder: [],
     shuffledPlaylist: [],
     hijackedIcons: new WeakSet(),
@@ -125,6 +180,13 @@ const MMP = {
     _layoutResizeObserver: null,
     _observedLayoutPanels: [],
     _layoutWindowListeners: [],
+    _playerHeightObserver: null,
+    _playerHeightRaf: null,
+    _playerHostObserver: null,
+    _observedHost: null,
+    _fileShowCloseObserver: null,
+    _orientationMedia: null,
+    _orientationListener: null,
 
     checkAudioInCurrentList() {
         const fileItems = document.querySelectorAll('li.file');
@@ -291,6 +353,7 @@ const MMP = {
         const root = document.getElementById('mmp-audio');
         if (root) {
             root.style.display = 'flex';
+            this.schedulePlayerLayout();
             const title = root.querySelector('.mmp-title');
             if (title) title.textContent = `Scanning: ${entry.name || 'folder'}...`;
         }
@@ -397,6 +460,11 @@ const MMP = {
                 requestAnimationFrame(() => this.checkBitrateCollision())
             })
             
+            // 頂置時播放器會真正放進這個 slot（header 內 #menu-bar 之後、
+            // breadcrumbs 之前），讓它跟 header 一起 sticky、一起移動，
+            // 不再靠 scroll 事件追趕 header。
+            HFS.onEvent('afterMenuBar', () => h('div', { id: 'mmp-top-slot' }))
+
             HFS.onEvent('afterList', () => {
                 if (this.isPlaying) {
                     document.getElementById('mmp-audio').style.display = 'flex'
@@ -935,10 +1003,13 @@ const MMP = {
     },
 
     async getPlaylist(folderUri, forceRefresh = false) {
+        // List-cache frozen mode: always re-read from the frozen listing,
+        // never trust a possibly stale normal-folder cache
+        const frozenNow = document.body.classList.contains('lc-frozen')
         if (!this.cfg.enable_cache) {
             return this.fetchPlaylistFromServer(folderUri)
         }
-        if (forceRefresh || !this.folderCache.has(folderUri)) {
+        if (forceRefresh || frozenNow || !this.folderCache.has(folderUri)) {
             const playlist = await this.fetchPlaylistFromServer(folderUri)
             this.folderCache.set(folderUri, playlist)
             this.persistPlaylistData()
@@ -947,7 +1018,35 @@ const MMP = {
         return this.folderCache.get(folderUri)
     },
 
+    // If List-cache serves this folder in frozen mode, return its complete
+    // entry list (all packets) instead of requesting HFS's list API.
+    async fetchFrozenEntries(folderUri) {
+        if (!document.body.classList.contains('lc-frozen')) return null
+        if (!window.HFS || typeof HFS.customRestCall !== 'function') return null
+        const uri = folderUri.endsWith('/') ? folderUri : folderUri + '/'
+        try {
+            const meta = await HFS.customRestCall('lc_meta', { uri })
+            if (!meta || !meta.frozen) return null
+            const all = await HFS.customRestCall('lc_all', { uri })
+            if (!all || !Array.isArray(all.entries)) return null
+            return all.entries
+        } catch (e) {
+            return null
+        }
+    },
+
     async fetchPlaylistFromServer(folderUri) {
+        // 聯動 List-cache：frozen list mode 下遍歷 lc_all 的完整清單
+        const frozenEntries = await this.fetchFrozenEntries(folderUri)
+        if (frozenEntries) {
+            return frozenEntries
+                .filter(f => f && f.n && this.audio_formats.test(f.n))
+                .map(f => ({
+                    name: f.n,
+                    uri: folderUri + encodeURIComponent(f.n)
+                }))
+        }
+
         try {
             const res = await fetch(`/~/api/get_file_list?uri=${encodeURIComponent(folderUri)}`)
             const data = await res.json()
@@ -1017,6 +1116,9 @@ const MMP = {
                 <div class='mmp-loading-indicator'></div>
             </div>`
         const bitrateHTML = this.cfg.show_bitrate ? `<span class='mmp-bitrate'></span>` : ''
+        // 圖標顯示「目前狀態」：頂置顯示 ☶，底置顯示 ☳
+        const positionIcon = this.position === 'top' ? ICON_DOCK_TOP : ICON_DOCK_BOTTOM
+        const positionTitle = this.position === 'top' ? 'Move player to bottom' : 'Move player to top'
         // 注意：音量控制模块在前，播放顺序切换按钮在后（左右对调）
         const playerHTML = `
         <div id='mmp-audio' class='mmp' style='display:none'>
@@ -1029,6 +1131,7 @@ const MMP = {
                 </div>
                 <div class='mmp-header-controls'>
                     ${volumeHTML}
+                    <button type="button" class='mmp-position-btn' title="${positionTitle}" aria-label="${positionTitle}">${positionIcon}</button>
                     <button type="button" class='mmp-shuffle-btn' title="Shuffle">${this.shuffleEnabled ? '⋈' : '⇌'}</button>
                     <button type="button" class='mmp-close' title="Close">✕</button>
                 </div>
@@ -1047,7 +1150,10 @@ const MMP = {
     </div>`;
         document.body.insertAdjacentHTML('beforeend', playerHTML)
         this.audioElement = document.querySelector('#mmp-audio audio')
+        this.applyPlayerPositionClasses()
         this.addFileMenuButton()
+        document.querySelector('.mmp-position-btn')?.addEventListener('click', () => this.togglePlayerPosition())
+        this.updatePlayerPositionButton()
         const shuffleBtn = document.querySelector('.mmp-shuffle-btn')
         if (shuffleBtn) {
             shuffleBtn.addEventListener('click', () => this.toggleShuffle())
@@ -1133,6 +1239,9 @@ const MMP = {
         setTimeout(() => this.checkBitrateCollision(), 50)
         setTimeout(() => this.checkBitrateCollision(), 300)
 
+        // ===== 监听播放器實際高度，讓 paging 上移量與列表底部留白跟隨 =====
+        this._observePlayerHeight(rootEl)
+
         this.setupPlayerLayout()
     },
 
@@ -1146,9 +1255,25 @@ const MMP = {
         this._layoutSetup = true;
 
         const schedule = () => this.schedulePlayerLayout();
+        // 方向一變就切換到該方向貯存的頂置/底置設定
+        const orientationChanged = () => this.onOrientationChanged();
         window.addEventListener('resize', schedule);
-        window.addEventListener('orientationchange', schedule);
-        this._layoutWindowListeners = [['resize', schedule], ['orientationchange', schedule]];
+        window.addEventListener('orientationchange', orientationChanged);
+        this._layoutWindowListeners = [
+            ['resize', schedule],
+            ['orientationchange', orientationChanged]
+        ];
+
+        // 橫屏 / 豎屏分開記住頂置或底置；方向切換時載入另一邊的設定
+        if (window.matchMedia) {
+            this._orientationMedia = window.matchMedia('(orientation: landscape)')
+            this._orientationListener = () => this.onOrientationChanged()
+            if (this._orientationMedia.addEventListener) {
+                this._orientationMedia.addEventListener('change', this._orientationListener)
+            } else if (this._orientationMedia.addListener) {
+                this._orientationMedia.addListener(this._orientationListener)
+            }
+        }
 
         if (window.MutationObserver) {
             this._layoutMutationObserver = new MutationObserver(() => schedule());
@@ -1174,6 +1299,216 @@ const MMP = {
         });
     },
 
+    // ===== 頂置 / 底置切換 =====
+    togglePlayerPosition() {
+        this.setPlayerPosition(this.position === 'top' ? 'bottom' : 'top')
+    },
+
+    setPlayerPosition(position, persist = true) {
+        this.position = position === 'top' ? 'top' : 'bottom'
+        if (persist && isLocalStorageSupported()) {
+            // 只改目前方向（橫屏 / 豎屏）的設定，另一方向保持不變
+            const key = PLAYER_POSITION_KEYS[currentOrientation()] || PLAYER_POSITION_KEYS.portrait
+            localStorage.setItem(key, this.position)
+        }
+        this.applyPlayerPositionClasses()
+        // 立刻把播放器移進 header slot（頂置）或移回 body（底置）
+        this.ensurePlayerDomPosition()
+        this.updatePlayerPositionButton()
+        this.schedulePlayerLayout()
+    },
+
+    applyPlayerPositionClasses() {
+        const top = this.position === 'top'
+        document.body.classList.toggle('mmp-position-top', top)
+        document.body.classList.toggle('mmp-position-bottom', !top)
+    },
+
+    updatePlayerPositionButton() {
+        const btn = document.querySelector('.mmp-position-btn')
+        if (!btn) return
+        const top = this.position === 'top'
+        // 按鈕圖標顯示目前狀態：頂置 ☶、底置 ☳
+        btn.textContent = top ? ICON_DOCK_TOP : ICON_DOCK_BOTTOM
+        const title = top ? 'Move player to bottom' : 'Move player to top'
+        btn.title = title
+        btn.setAttribute('aria-label', title)
+        btn.setAttribute('aria-pressed', top ? 'true' : 'false')
+    },
+
+    // 橫屏 / 豎屏各有自己的頂置或底置設定；方向一變就切換到該方向的設定
+    onOrientationChanged() {
+        const next = getPlayerPosition()
+        if (next !== this.position) {
+            this.position = next
+            this.applyPlayerPositionClasses()
+            this.updatePlayerPositionButton()
+        }
+        this.ensurePlayerDomPosition()
+        this.schedulePlayerLayout()
+    },
+
+    // 把 #mmp-audio 實際移進 header 內的 #mmp-top-slot（頂置），
+    // 或移回 body（底置）。播放器元素本身保留，所以 audio 播放狀態
+    // 和事件都不會中斷；移進 header 後由瀏覽器原生跟著 sticky 移動。
+    ensurePlayerDomPosition() {
+        const root = document.getElementById('mmp-audio')
+        const body = document.body
+        if (!root || !body) return false
+        // 檔案預覽/圖片瀏覽器開啟期間不要搬動播放器，避免打斷其他外掛
+        if (document.querySelector('.file-show')) return false
+
+        const header = document.querySelector('.list-wrapper > header') || document.querySelector('header')
+        // menu panel 在 header 內 => menu_at_top=true；否則 menu 在最下方
+        const menuAtTop = !!(header && header.querySelector('#menu-panel'))
+        const clearInline = () => {
+            root.style.left = ''
+            root.style.right = ''
+            root.style.width = ''
+        }
+        if (this.position === 'top') {
+            body.classList.remove('mmp-bottom-stack')
+            let host = null
+
+            if (menuAtTop) {
+                // menu 在上：放在 header 內、menu 列與麵包屑列之間
+                host = document.getElementById('mmp-top-slot')
+                if (host && root.parentElement !== host) {
+                    clearInline()
+                    host.appendChild(root)
+                }
+            } else if (header) {
+                // menu 在下：header 只剩麵包屑列，播放器放在 header 最上方
+                host = header
+                if (root.parentElement !== header || header.firstElementChild !== root) {
+                    clearInline()
+                    header.insertBefore(root, header.firstChild)
+                }
+            }
+
+            body.classList.toggle('mmp-embedded', !!host)
+            return !!host
+        }
+
+        body.classList.remove('mmp-embedded')
+
+        // menu 在下：播放器嵌進底部工具列，paging 與 menu panel 之間
+        if (!menuAtTop) {
+            const positioner = document.querySelector('.bottom-bar-stack-positioner')
+            const menuPanel = positioner ? positioner.querySelector('#menu-panel') : null
+            if (positioner && menuPanel) {
+                if (root.parentElement !== positioner || root.nextElementSibling !== menuPanel) {
+                    clearInline()
+                    positioner.insertBefore(root, menuPanel)
+                }
+                body.classList.add('mmp-bottom-stack')
+                return false
+            }
+        }
+
+        body.classList.remove('mmp-bottom-stack')
+        if (root.parentElement !== body) body.appendChild(root)
+        return false
+    },
+
+    // HFS/Preact 重新渲染時，頂置播放器的 header 宿主可能被替換
+    // 或把播放器移掉；監聽 header 並在需要時把它放回去。
+    _observePlayerHost() {
+        if (!window.MutationObserver) return
+
+        let host = null
+        if (this.position === 'top') {
+            host = document.querySelector('.list-wrapper > header') || document.querySelector('header')
+        } else if (document.body.classList.contains('mmp-bottom-stack')) {
+            host = document.querySelector('.bottom-bar-stack-positioner')
+        }
+
+        if (!host) {
+            if (this._playerHostObserver) {
+                this._playerHostObserver.disconnect()
+                this._playerHostObserver = null
+                this._observedHost = null
+            }
+            return
+        }
+        if (this._playerHostObserver && this._observedHost === host) return
+        if (this._playerHostObserver) this._playerHostObserver.disconnect()
+
+        this._playerHostObserver = new MutationObserver(() => {
+            if (document.querySelector('.file-show')) return
+            if (this.position === 'top' || document.body.classList.contains('mmp-bottom-stack')) {
+                this.ensurePlayerDomPosition()
+            }
+        })
+        this._playerHostObserver.observe(host, { childList: true, subtree: true })
+        this._observedHost = host
+    },
+
+    // 圖片/檔案預覽關閉後，恢復播放器版面同步
+    _watchFileShowClose() {
+        if (this._fileShowCloseObserver || !window.MutationObserver) return
+        this._fileShowCloseObserver = new MutationObserver(() => {
+            if (document.querySelector('.file-show')) return
+            this._fileShowCloseObserver.disconnect()
+            this._fileShowCloseObserver = null
+            this.schedulePlayerLayout()
+        })
+        this._fileShowCloseObserver.observe(document.body, { childList: true, subtree: true })
+    },
+
+    // ===== 垂直佈局：播放器貼底、paging 疊在播放器上方 =====
+    // 播放器高度不是固定值（按鈕高度、橫豎屏、視窗寬度、是否顯示音量
+    // 控制都會影響），量測後寫入 --mmp-player-height；style.css 再用
+    // 這個變數把 .bottom-bar-stack-positioner（paging）抬到播放器頂部，
+    // 並替 .bottom-bar-stack 補上等高的底部留白。
+    _observePlayerHeight(root) {
+        if (!window.ResizeObserver || !root) return;
+        if (this._playerHeightObserver) {
+            try { this._playerHeightObserver.disconnect(); } catch (e) {}
+        }
+        this._playerHeightObserver = new ResizeObserver(() => {
+            if (this._playerHeightRaf) return;
+            this._playerHeightRaf = requestAnimationFrame(() => {
+                this._playerHeightRaf = null;
+                this.syncPlayerBarOffset();
+            });
+        });
+        this._playerHeightObserver.observe(root);
+    },
+
+    syncPlayerBarOffset(root = document.getElementById('mmp-audio')) {
+        const docEl = document.documentElement;
+        const body = document.body;
+        if (!docEl || !body) return;
+        if (document.querySelector('.file-show')) return;
+
+        let visible = false;
+        let height = 0;
+        if (root) {
+            const cs = getComputedStyle(root);
+            visible = cs.display !== 'none' && cs.visibility !== 'hidden';
+            if (visible) {
+                // 保留小數高度，讓 paging 的下緣與播放器的上緣精準貼合，
+                // 不會出現 1px 的縫隙或重疊。
+                height = Math.round((root.getBoundingClientRect().height || 0) * 100) / 100;
+            }
+        }
+
+        if (!visible || height <= 0) {
+            body.classList.remove('mmp-open');
+            if (docEl.style.getPropertyValue('--mmp-player-height') !== '0px') {
+                docEl.style.setProperty('--mmp-player-height', '0px');
+            }
+            return;
+        }
+
+        body.classList.add('mmp-open');
+        const next = height + 'px';
+        if (docEl.style.getPropertyValue('--mmp-player-height') !== next) {
+            docEl.style.setProperty('--mmp-player-height', next);
+        }
+    },
+
     // 监听面板尺寸变化（拖拽分隔条时能实时跟随）
     _observeLayoutPanels() {
         if (!window.ResizeObserver) return;
@@ -1182,7 +1517,14 @@ const MMP = {
         }
         const next = [
             document.querySelector('.hfs-tree-nav'),
-            document.querySelector('.note-panel')
+            document.querySelector('.note-panel'),
+            // header 高度改變（選單換行、外掛列變動）時，頂置播放器要跟著移動
+            document.querySelector('.list-wrapper > header') || document.querySelector('header'),
+            // menu 在下時，底部工具列高度（paging/menu）改變要重算播放器 bottom
+            document.querySelector('.bottom-bar-stack-positioner'),
+            // paging 被抽出工具列排版後，顯示/隱藏或高度變化也要重算留白
+            document.getElementById('lc-paging'),
+            document.getElementById('paging')
         ].filter(Boolean);
         const prev = this._observedLayoutPanels || [];
         for (const el of prev) {
@@ -1201,7 +1543,29 @@ const MMP = {
     syncPlayerLayout() {
         const root = document.getElementById('mmp-audio');
         if (!root) return;
+        // 檔案預覽/圖片瀏覽器開啟期間暫停版面同步，避免打斷其他外掛；
+        // 關閉後再排一次同步恢復播放器版面
+        if (document.querySelector('.file-show')) {
+            this._watchFileShowClose()
+            return;
+        }
+
+        // 先確保播放器在正確的 DOM 位置（頂置：header slot；底置：body）
+        this.ensurePlayerDomPosition();
+        this._observePlayerHost();
+
+        // 縱向：底置時把播放器高度寫入變數，供 paging 與列表留白使用
+        this.syncPlayerBarOffset(root);
         this._observeLayoutPanels();
+
+        // 頂置時在 header 內、或底置但嵌在底部工具列時，
+        // 寬度由宿主決定，不需要左右內縮
+        if (this.position === 'top' || document.body.classList.contains('mmp-bottom-stack')) {
+            root.style.left = '';
+            root.style.right = '';
+            root.style.width = '';
+            return;
+        }
 
         const vw = document.documentElement.clientWidth || window.innerWidth || 0;
         if (!vw) return;
@@ -1249,9 +1613,12 @@ const MMP = {
             right = Math.floor(right * scale);
         }
 
-        root.style.left = left + 'px';
-        root.style.right = right + 'px';
-        root.style.width = 'auto';
+        // 只在值真的變動時才寫入，避免反覆觸發 body 的 MutationObserver
+        const leftPx = left + 'px';
+        const rightPx = right + 'px';
+        if (root.style.left !== leftPx) root.style.left = leftPx;
+        if (root.style.right !== rightPx) root.style.right = rightPx;
+        if (root.style.width !== 'auto') root.style.width = 'auto';
     },
 
     // 检测标题是否已触碰到比特率，若是则隐藏比特率；空间恢复后自动显示
@@ -2225,6 +2592,8 @@ const MMP = {
         const audio = this.audioElement;
         const bitrateDisplay = root.querySelector('.mmp-bitrate');
         root.style.display = 'none';
+        // 播放器收起：paging 回到最底部、列表底部留白歸零
+        this.schedulePlayerLayout();
         if (audio) {
             audio.pause();
             audio.src = '';
@@ -2273,6 +2642,36 @@ const MMP = {
             this._layoutResizeObserver.disconnect();
             this._layoutResizeObserver = null;
         }
+        if (this._playerHostObserver) {
+            this._playerHostObserver.disconnect();
+            this._playerHostObserver = null;
+            this._observedHost = null;
+        }
+        if (this._fileShowCloseObserver) {
+            this._fileShowCloseObserver.disconnect();
+            this._fileShowCloseObserver = null;
+        }
+        if (this._playerHeightObserver) {
+            this._playerHeightObserver.disconnect();
+            this._playerHeightObserver = null;
+        }
+        if (this._playerHeightRaf) {
+            cancelAnimationFrame(this._playerHeightRaf);
+            this._playerHeightRaf = null;
+        }
+        if (this._orientationMedia && this._orientationListener) {
+            if (this._orientationMedia.removeEventListener) {
+                this._orientationMedia.removeEventListener('change', this._orientationListener);
+            } else if (this._orientationMedia.removeListener) {
+                this._orientationMedia.removeListener(this._orientationListener);
+            }
+            this._orientationMedia = null;
+            this._orientationListener = null;
+        }
+        if (document.body) {
+            document.body.classList.remove('mmp-open', 'mmp-position-top', 'mmp-position-bottom', 'mmp-embedded', 'mmp-bottom-stack');
+        }
+        document.documentElement.style.setProperty('--mmp-player-height', '0px');
         this._observedLayoutPanels = [];
         if (this._layoutSyncRaf) {
             cancelAnimationFrame(this._layoutSyncRaf);

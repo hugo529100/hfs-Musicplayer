@@ -1,7 +1,35 @@
-/* 在播放器CSS中添加 */
+/* ================================================================
+   播放器佈局：底置（預設）/ 頂置
+   ----------------------------------------------------------------
+   底置：
+   - .mmp 固定在 bottom: 0，永遠是畫面最底層的 UI；
+   - HFS 的 .bottom-bar-stack-positioner（內含原生 #paging、
+     List-cache 的 #lc-paging、剪貼簿列等）在播放器顯示時，
+     整體上移「播放器高度」，所以 paging 會緊貼在播放器頂部；
+   - .bottom-bar-stack 同時補上等高的 padding-bottom，替播放器
+     保留底部空間，目錄列表捲動到底部時，最後的檔案可以完全
+     露在播放器上方，不會被遮擋。
+
+   頂置：
+   - 播放器內嵌在 header 內，位於選單列（#menu-bar）與麵包屑列
+     （breadcrumbs）之間，把 header 的兩行按鈕分開；
+   - #mmp-top-slot（由 main.js 掛在 HFS afterMenuBar 位置）是
+     header 內的容器，main.js 會把 #mmp-audio 直接移進去；
+   - 播放器改成 position: relative，和 header 在同一個排版流裡，
+     所以捲動時由瀏覽器原生一起移動，不會與 header 錯開；
+   - paging 留在原本的底部位置，不跟著播放器移動。
+   - 頂置/底置設定橫屏、豎屏分開貯存。
+
+   播放器高度不是固定值（按鈕高度、橫豎屏、視窗寬度、有無音量
+   控制都會影響），所以由 main.js 量測實際高度後寫入
+   --mmp-player-height（px），並在尺寸變化時即時更新。
+   頂置/底置的選擇存在 localStorage
+   （mmp_player_position_landscape / mmp_player_position_portrait）。
+   ================================================================ */
 .mmp {
     position: fixed;
     bottom: 0;
+    top: auto;
     left: 0;
     width: 100%;
     display: none;
@@ -15,30 +43,88 @@
     backdrop-filter: blur(18px);
     /*box-shadow: 0px 0px 4px 4px #00000042;*/
     --mmp-button-height: var(--mmp-custom-height, 4vw);
-    gap: 0.5em;
+    gap: 0.3em;
     /* 添加过渡效果 */
     transition: bottom 0.3s ease;
 }
 
-
-/* 情况1：没有底部 menu-panel，也没有 paging → 贴底部 */
-body:not(:has(.bottom-bar-stack #menu-panel)):not(:has(#paging)) .mmp {
-    bottom: 0;
+/* ================================================================
+   底置模式（預設）
+   - menu panel 在上：播放器貼在視窗最底，paging 疊在播放器上方
+   - menu panel 在下：播放器嵌進底部工具列，位於 paging 與 menu panel
+     之間；paging 留在工具列內，保留原有的背景遮罩
+   ================================================================ */
+/* menu 在上：底部工具列整條上移到播放器頂部。 */
+body.mmp-open.mmp-position-bottom:not(.mmp-bottom-stack) .bottom-bar-stack-positioner {
+    bottom: var(--mmp-player-height, 0px) !important;
 }
 
-/* 情况2：只有 paging（没有底部 menu-panel） */
-body:has(#paging):not(:has(.bottom-bar-stack #menu-panel)) .mmp {
-    bottom: 22px;
+/* menu 在上：列表尾端預留播放器高度，最後一列不會躲在播放器後面 */
+body.mmp-open.mmp-position-bottom:not(.mmp-bottom-stack) .bottom-bar-stack {
+    padding-bottom: var(--mmp-player-height, 0px);
 }
 
-/* 情况3：只有底部 menu-panel（没有 paging） */
-body:has(.bottom-bar-stack #menu-panel):not(:has(#paging)) .mmp {
-    bottom: 41px;
+/* menu 在下：positioner 留在最底部，但底色交給 paging/menu 自己，
+   這樣嵌在中間的播放器可以保留自己的背景與模糊（不會疊成兩層黑）。 */
+body.mmp-open.mmp-position-bottom.mmp-bottom-stack .bottom-bar-stack-positioner {
+    bottom: 0 !important;
+    background: transparent;
+    backdrop-filter: none;
 }
 
-/* 情况4：两者都有（底部 menu-panel + paging） */
-body:has(.bottom-bar-stack #menu-panel):has(#paging) .mmp {
-    bottom: 64px;  /* 41 + 25.6 */
+body.mmp-open.mmp-position-bottom.mmp-bottom-stack #mmp-audio {
+    position: relative;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    left: auto;
+    width: 100%;
+}
+
+/* 原生 #paging 在 Orange theme 是透明底；positioner 透明後要自己補回
+   底色，否則會和後面的 dir 混在一起。List-cache paging 與 menu 同理。 */
+body.mmp-open.mmp-position-bottom.mmp-bottom-stack #paging,
+body.mmp-open.mmp-position-bottom.mmp-bottom-stack #lc-paging,
+body.mmp-open.mmp-position-bottom.mmp-bottom-stack #menu-panel {
+    background-color: var(--bg);
+}
+
+/* ================================================================
+   頂置模式：播放器真正嵌入 header 內
+   ----------------------------------------------------------------
+   - menu panel 在上：#mmp-top-slot 由 main.js 掛在 afterMenuBar
+     （header 內 #menu-bar 之後、breadcrumbs 之前），播放器放進
+     slot，介於兩行按鈕之間。
+   - menu panel 在下：header 只剩麵包屑列，main.js 會把播放器插到
+     header 最前面，位於麵包屑列之上。
+   兩種情況播放器都是 position: relative，和 header 在同一個
+   DOM/排版流裡，捲動時由瀏覽器原生一起移動，不會錯開。
+   paging 不受影響，仍留在原本的底部位置。
+   ================================================================ */
+#mmp-top-slot {
+    width: 100%;
+    min-width: 0;
+}
+
+#mmp-top-slot:empty {
+    display: none;
+}
+
+body.mmp-open.mmp-position-top.mmp-embedded #mmp-audio {
+    position: relative;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    left: auto;
+    width: 100%;
+    /* header 已有背景色與模糊，播放器不再重複一層 */
+    background: transparent;
+    backdrop-filter: none;
+}
+
+/* 頂置時 paging 回到原來的底部位置（不跟著播放器上移） */
+body.mmp-open.mmp-position-top .bottom-bar-stack-positioner {
+    bottom: 0 !important;
 }
 
 .mmp-media {
@@ -58,22 +144,25 @@ body:has(.bottom-bar-stack #menu-panel):has(#paging) .mmp {
 
 .mmp-time {
     font-size: 0.8em;
-    min-width: 5em;
+    /* 不預留固定寬度：倒數計時（-6:53）會自動收窄，正計時才依內容變寬 */
+    min-width: 0;
+    white-space: nowrap;
     text-align: center;
     color: var(--text);
     flex-shrink: 0;
-    padding-top: 0;
-    padding-bottom: 0;
-    padding-left: 3px;
-    padding-right: 3px;
-    margin-right: 0.3em;
+    /* 四邊等寬，讓時間文字與碼率、標題在同一水平中心線上 */
+    padding: 4px;
+    margin-right: 0.2em;
     line-height: 1.2;
     border: 1px solid var(--good-contrast);
     border-radius: 0.4em;
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 1.6em;
+    /* 與右側 1.5em 方形按鈕同高（0.8em × 1.875 = 1.5em） */
+    height: 1.875em;
+    min-height: 0;
+    box-sizing: border-box;
 }
 
 /* 比特率显示样式 */
@@ -91,7 +180,10 @@ body:has(.bottom-bar-stack #menu-panel):has(#paging) .mmp {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 1.6em;
+    /* 與時間框、右側方形按鈕同高 */
+    height: 1.875em;
+    min-height: 0;
+    box-sizing: border-box;
 }
 
 .mmp-title-container {
@@ -124,38 +216,31 @@ body:has(.bottom-bar-stack #menu-panel):has(#paging) .mmp {
     min-height: 1.5em;
 }
 
-/* 随机播放按钮样式 - 跟随音量按钮风格 */
-.mmp-shuffle-btn {
-    width: 2.0em;
-    height: 1.5em;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 1em;
-    padding: 0;
-}
-
-.mmp-shuffle-btn:hover {
-    opacity: 0.8;
-}
-
-/* 文件菜单按钮样式 - 跟随关闭按钮风格 */
-.mmp-filemenu-btn {
+/* mmp-header-controls 內所有按鈕共用一套緊湊方形樣式
+   （頂置/底置、shuffle、file menu、close，以及顯示音量時的小按鈕） */
+.mmp-header-controls button {
+    flex: 0 0 auto;
     width: 1.5em;
     height: 1.5em;
+    min-width: 1.5em;
+    min-height: 1.5em;
     display: flex;
     align-items: center;
     justify-content: center;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    appearance: none;
     border: 1px solid var(--text);
     border-radius: 0.3em;
-    color: var(--text);
-    cursor: pointer;
-    font-size: 1em;
     background: transparent;
+    color: var(--text);
+    font-size: 1em;
+    line-height: 1;
+    cursor: pointer;
 }
 
-.mmp-filemenu-btn:hover {
+.mmp-header-controls button:hover {
     background-color: var(--button-bg);
     color: var(--button-text);
     outline: none;
@@ -213,19 +298,6 @@ body:has(.bottom-bar-stack #menu-panel):has(#paging) .mmp {
 .mmp-volume-value {
     min-width: 3em;
     text-align: center;
-    font-size: 1em;
-}
-
-.mmp-close {
-    width: 1.5em;
-    height: 1.5em;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--text);
-    border-radius: 0.3em;
-    color: var(--text);
-    cursor: pointer;
     font-size: 1em;
 }
 
@@ -429,8 +501,8 @@ button.mmp-play {
     }
     .mmp-time {
         margin-right: 0.1em;
-        min-width: 4.5em;
-        min-height: 1.6em;
+        min-width: 0;
+        min-height: 0;
     }
     /* 竖屏下始终隐藏 bitrate，保持简约，避免长文件名挤占 */
     .mmp-bitrate {
@@ -439,41 +511,45 @@ button.mmp-play {
     .mmp-title {
         text-align: center;
     }
-    /* 竖屏时隐藏音量控制区域和文件菜单按钮 */
+    /* 竖屏时隐藏音量控制、乱序播放和文件菜单按钮。
+       统一方形按钮规则会设 display:flex，所以这里必须用 !important 才压得住。 */
     .mmp-volume-control,
     .mmp-shuffle-btn,
     .mmp-filemenu-btn {
-        display: none;
+        display: none !important;
     }
 }
 
 @media (orientation: landscape) {
     .mmp-header {
-        justify-content: center;
-        padding: 0.2em 0;
+        /* 時間與比特率靠左排在一起，中間剩餘空間留給標題置中 */
+        justify-content: flex-start;
     }
     .mmp-time {
-        position: absolute;
-        left: 0.5em;
-        margin-right: 0;
-        min-height: 1.6em;
-        min-width: 7em;
+        position: static;
+        left: auto;
+        margin-right: 0.2em;
+        min-height: 0;
+        min-width: 0;
     }
     .mmp-bitrate {
-        position: absolute;
-        left: 8.5em;
-        margin-right: 0;
+        position: static;
+        left: auto;
+        margin-right: 0.3em;
         min-height: 1.6em;
     }
     .mmp-title-container {
-        max-width: 55%;
+        flex: 1 1 auto;
+        max-width: none;
+        margin: 0 0.3em;
     }
     .mmp-title {
-        max-width: 80%;
+        max-width: 100%;
     }
     .mmp-header-controls {
-        position: absolute;
-        right: 0.5em;
+        position: static;
+        right: auto;
+        margin-left: 0.2em;
     }
 }
 
